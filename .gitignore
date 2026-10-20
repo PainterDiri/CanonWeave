@@ -1,0 +1,89 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# Node.js / frontend
+node_modules/
+.pnpm-store/
+.yarn/
+dist/
+dist-ssr/
+build/
+coverage/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite
+.vite/
+
+# Vitest / Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Rust / Cargo
+target/
+**/target/
+*.rs.bk
+*.pdb
+
+# Tauri
+src-tauri/gen/
+src-tauri/target/
+src-tauri/.tauri/
+*.app
+*.dmg
+*.msi
+*.exe
+*.AppImage
+*.deb
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Local databases and runtime data
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/local/
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+.cache/
+
+# Test and coverage artifacts
+.nyc_output/
+*.lcov
+
+# TypeScript build info
+*.tsbuildinfo
