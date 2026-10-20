@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Library } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { CanonPage } from "@/features/canon/CanonPage";
@@ -7,7 +6,6 @@ import { CharactersPage } from "@/features/characters/CharactersPage";
 import { Onboarding } from "@/features/onboarding/Onboarding";
 import { PromisesPage } from "@/features/promises/PromisesPage";
 import { OverviewPage } from "@/features/project/OverviewPage";
-import { PlaceholderPage } from "@/features/placeholder/PlaceholderPage";
 import { SeedPage } from "@/features/seed/SeedPage";
 import { StudioPage } from "@/features/studio/StudioPage";
 import { ipc } from "@/lib/ipc";
@@ -15,6 +13,9 @@ import { useAppStore } from "@/stores/ui";
 
 const MapPage = lazy(() =>
   import("@/features/map/MapPage").then((module) => ({ default: module.MapPage })),
+);
+const WikiPageView = lazy(() =>
+  import("@/features/wiki/WikiPage").then((module) => ({ default: module.WikiPageView })),
 );
 
 export default function App() {
@@ -96,13 +97,15 @@ export default function App() {
       ) : null}
       {nav === "promises" ? <PromisesPage /> : null}
       {nav === "wiki" ? (
-        <PlaceholderPage
-          eyebrow="Narrative Wiki"
-          title="叙事百科"
-          icon={<Library size={20} />}
-          emptyTitle="派生视图尚未编译"
-          description="百科由已确认事实生成，每页带来源与内容哈希。事实变化后会标记过期并可全量重建。"
-        />
+        <Suspense
+          fallback={
+            <div className="flex h-64 items-center justify-center text-[12px] text-muted">
+              正在编译叙事百科…
+            </div>
+          }
+        >
+          <WikiPageView />
+        </Suspense>
       ) : null}
       {nav === "studio" ? <StudioPage /> : null}
       {nav === "audit" ? <AuditPage /> : null}

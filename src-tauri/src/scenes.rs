@@ -168,6 +168,7 @@ pub fn save_scene(conn: &Connection, project_id: &str, input: &SceneInput) -> Ap
         )?;
         id
     };
+    crate::graphrag::mark_stale(conn, project_id)?;
     get_scene(conn, project_id, &id)
 }
 
@@ -334,6 +335,7 @@ pub fn commit_text(
             chapter_id
         ],
     )?;
+    crate::graphrag::mark_stale(&tx, project_id)?;
     tx.commit()?;
     Ok(DraftAcceptResult {
         chapter_id: chapter_id.to_string(),

@@ -83,6 +83,8 @@ export const commands = {
 	promiseList: () => typedError<PromiseRecord[], string>(__TAURI_INVOKE("promise_list")),
 	promiseSave: (input: PromiseInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_save", { input })),
 	promiseTransition: (input: PromiseStateInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_transition", { input })),
+	promisePayoffCheck: (input: PromisePayoffInput) => typedError<PayoffCheck, string>(__TAURI_INVOKE("promise_payoff_check", { input })),
+	promisePayoff: (input: PromisePayoffInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_payoff", { input })),
 	stylePresetList: () => __TAURI_INVOKE<StylePreset[]>("style_preset_list"),
 	styleProfileList: () => typedError<StyleProfile[], string>(__TAURI_INVOKE("style_profile_list")),
 	styleProfileGet: (id: string) => typedError<StyleProfile, string>(__TAURI_INVOKE("style_profile_get", { id })),
@@ -136,6 +138,18 @@ export const commands = {
 	communityList: () => typedError<CommunityReport[], string>(__TAURI_INVOKE("community_list")),
 	impactAnalysis: (entityId: string) => typedError<ImpactSet, string>(__TAURI_INVOKE("impact_analysis", { entityId })),
 	insightQuery: (question: string) => typedError<InsightResult, string>(__TAURI_INVOKE("insight_query", { question })),
+	wikiList: () => typedError<WikiPage[], string>(__TAURI_INVOKE("wiki_list")),
+	wikiRebuild: () => typedError<WikiRebuildResult, string>(__TAURI_INVOKE("wiki_rebuild")),
+	wikiProposeEdit: (input: WikiEditInput) => typedError<Candidate, string>(__TAURI_INVOKE("wiki_propose_edit", { input })),
+	voiceSampleList: (characterId: string) => typedError<CharacterVoiceSample[], string>(__TAURI_INVOKE("voice_sample_list", { characterId })),
+	voiceSampleAdd: (input: VoiceSampleInput) => typedError<CharacterVoiceSample, string>(__TAURI_INVOKE("voice_sample_add", { input })),
+	voiceProfileGet: (characterId: string) => typedError<CharacterVoiceProfile, string>(__TAURI_INVOKE("voice_profile_get", { characterId })),
+	voiceThresholdsSave: (input: VoiceThresholdInput) => typedError<CharacterVoiceProfile, string>(__TAURI_INVOKE("voice_thresholds_save", { input })),
+	voiceCheck: (characterId: string, text: string, sceneId: string | null) => typedError<VoiceCheck, string>(__TAURI_INVOKE("voice_check", { characterId, text, sceneId })),
+	preferenceSummary: (sceneId: string | null) => typedError<PreferenceSummary, string>(__TAURI_INVOKE("preference_summary", { sceneId })),
+	motifList: () => typedError<MotifRecord[], string>(__TAURI_INVOKE("motif_list")),
+	motifDensityCheck: (sceneId: string, text: string) => typedError<MotifCheck, string>(__TAURI_INVOKE("motif_density_check", { sceneId, text })),
+	exportProject: (input: ExportInput) => typedError<ExportResult, string>(__TAURI_INVOKE("export_project", { input })),
 };
 
 /* Types */
@@ -282,6 +296,25 @@ export type CharacterInput = {
 	voiceAnchor: string,
 };
 
+export type CharacterVoiceProfile = {
+	characterId: string,
+	centroid: VoiceDimensions,
+	thresholds: VoiceThresholds,
+	sampleCount: number,
+	version: number,
+	updatedAt: string | null,
+};
+
+export type CharacterVoiceSample = {
+	id: string,
+	characterId: string,
+	text: string,
+	sourceSpan: string,
+	sourceType: string,
+	metrics: VoiceDimensions,
+	createdAt: string,
+};
+
 export type ChatMessage = {
 	id: string,
 	sessionId: string,
@@ -401,6 +434,19 @@ export type Entity = {
 	description: string,
 };
 
+export type ExportInput = {
+	format: string,
+	includeWiki: boolean,
+};
+
+export type ExportResult = {
+	path: string,
+	format: string,
+	chapters: number,
+	words: number,
+	includesWiki: boolean,
+};
+
 export type ExtractionResult = {
 	candidatesCreated: number,
 };
@@ -506,6 +552,30 @@ export type ModelTestResult = {
 	model: string,
 };
 
+export type MotifCheck = {
+	chars: number,
+	motifs: MotifRecord[],
+	hints: MotifHint[],
+};
+
+export type MotifHint = {
+	motif: string,
+	count: number,
+	per1000: number,
+	severity: string,
+	message: string,
+};
+
+export type MotifRecord = {
+	id: string,
+	name: string,
+	meaning: string,
+	channels: string[],
+	firstSceneId: string | null,
+	lastSceneId: string | null,
+	useCount: number,
+};
+
 export type OutlineNode = {
 	id: string,
 	parentId: string | null,
@@ -537,6 +607,14 @@ export type OutlineUpdateInput = {
 	payoff: string,
 };
 
+export type PayoffCheck = {
+	ready: boolean,
+	blockers: string[],
+	plantEvidenceIds: string[],
+	payoffEvidenceIds: string[],
+	stateChange: string,
+};
+
 export type PlotBeatsInput = {
 	sessionId: string,
 	instruction: string,
@@ -557,6 +635,21 @@ export type PreferenceInput = {
 	rightRunId: string,
 	chosenRunId: string,
 	reason: string,
+	leftText: string | null,
+	rightText: string | null,
+};
+
+export type PreferenceSummary = {
+	choices: number,
+	target: PreferenceTarget | null,
+};
+
+export type PreferenceTarget = {
+	avgSentenceLen: number,
+	dialogueRatio: number,
+	sensoryPer1000: number,
+	metaphorPer1000: number,
+	adverbPer1000: number,
 };
 
 export type Premise = {
@@ -649,6 +742,13 @@ export type PromiseInput = {
 	payoffContract: string,
 };
 
+export type PromisePayoffInput = {
+	id: string,
+	sourceId: string,
+	quote: string,
+	stateChange: string,
+};
+
 export type PromiseRecord = {
 	id: string,
 	title: string,
@@ -657,6 +757,9 @@ export type PromiseRecord = {
 	targetWindow: string,
 	payoffContract: string,
 	evidenceIds: string[],
+	plantEvidenceIds: string[],
+	payoffEvidenceIds: string[],
+	payoffStateChange: string,
 	createdAt: string,
 	updatedAt: string,
 };
@@ -948,6 +1051,97 @@ export type TimelineItem = {
 	branchId: string | null,
 	source: string,
 	detail: string,
+};
+
+export type VoiceCheck = {
+	characterId: string,
+	centroid: VoiceDimensions,
+	segments: VoiceSegment[],
+	drifts: VoiceDrift[],
+	voiceDrift: boolean,
+};
+
+export type VoiceDimensions = {
+	avgSentenceLen: number,
+	sentenceVariance: number,
+	punctuationPer100: number,
+	pronounRatio: number,
+	dialogueActionRatio: number,
+	dialogueRatio: number,
+	preferredPronoun: string,
+};
+
+export type VoiceDrift = {
+	dimension: string,
+	current: number,
+	target: number,
+	delta: number,
+	severity: string,
+	segmentIndex: number,
+	start: number,
+	end: number,
+	excerpt: string,
+	suggestion: string,
+};
+
+export type VoiceSampleInput = {
+	characterId: string,
+	text: string,
+	sourceSpan: string,
+	sourceType: string,
+};
+
+export type VoiceSegment = {
+	index: number,
+	kind: string,
+	start: number,
+	end: number,
+	excerpt: string,
+	metrics: VoiceDimensions,
+};
+
+export type VoiceThresholdInput = {
+	characterId: string,
+	thresholds: VoiceThresholds,
+};
+
+export type VoiceThresholds = {
+	sentenceLen: number,
+	sentenceVariance: number,
+	punctuation: number,
+	pronoun: number,
+	dialogueAction: number,
+};
+
+export type WikiEditInput = {
+	pageId: string,
+	title: string,
+	content: string,
+};
+
+export type WikiPage = {
+	id: string,
+	entityId: string | null,
+	kind: string,
+	title: string,
+	content: string,
+	contentHash: string,
+	sourceIds: string[],
+	sourceSpans: string[],
+	generatorVersion: number,
+	editedByAuthor: boolean,
+	generatedAt: string,
+	staleAt: string | null,
+};
+
+export type WikiRebuildResult = {
+	pages: WikiPage[],
+	characters: number,
+	places: number,
+	rules: number,
+	timelines: number,
+	promises: number,
+	chapters: number,
 };
 
 /* Tauri Specta runtime */

@@ -172,7 +172,51 @@ pub fn list(
             .collect::<Result<Vec<_>, _>>()?,
     };
     drop(stmt);
+    let target = crate::preferences::targets(conn, project_id, None)?;
+    let mut rows = rows;
+    rows.sort_by(|left, right| {
+        let rank = |risk: &str| match risk {
+            "L3" => 0,
+            "L2" => 1,
+            "L1" => 2,
+            _ => 3,
+        };
+        let left_score = target
+            .as_ref()
+            .map(|target| {
+                crate::preferences::score_with_target(&candidate_text(&left.payload), target)
+            })
+            .unwrap_or(0.0);
+        let right_score = target
+            .as_ref()
+            .map(|target| {
+                crate::preferences::score_with_target(&candidate_text(&right.payload), target)
+            })
+            .unwrap_or(0.0);
+        rank(&left.risk_level)
+            .cmp(&rank(&right.risk_level))
+            .then_with(|| right_score.partial_cmp(&left_score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+    });
     Ok(rows)
+}
+
+fn candidate_text(payload: &Value) -> String {
+    [
+        "text",
+        "title",
+        "description",
+        "object",
+        "quote",
+        "canonicalName",
+        "contract",
+        "goal",
+        "conflict",
+    ]
+    .iter()
+    .filter_map(|key| payload.get(*key).and_then(Value::as_str))
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 pub fn queue(conn: &Connection, project_id: &str) -> AppResult<ReviewQueue> {
@@ -517,6 +561,7 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             )?;
             id
         }
+        "wiki_edit" => crate::wiki::apply_confirmed_edit(&tx, project_id, &candidate)?,
         other => {
             return Err(AppError::Message(format!(
                 "暂不支持确认该类型候选：{other}"
@@ -539,7 +584,9 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             ts
         ],
     )?;
-    crate::graphrag::mark_stale(&tx, project_id)?;
+    if candidate.kind != "wiki_edit" {
+        crate::graphrag::mark_stale(&tx, project_id)?;
+    }
     tx.commit()?;
     let updated = get(conn, project_id, id)?;
     Ok(CandidateAcceptResult {
@@ -965,6 +1012,52 @@ mod tests {
     fn missing_source_escalates_to_l2() {
         assert_eq!(risk_for("entity", &json!({}), false), "L2");
         assert_eq!(risk_for("entity", &json!({}), true), "L1");
+    }
+
+    #[test]
+    fn local_preference_reorders_candidates_within_same_risk() {
+        let (_dir, loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        crate::preferences::save(
+            &loaded.conn,
+            &pid,
+            &crate::domain::PreferenceInput {
+                scene_id: None,
+                left_run_id: "a".into(),
+                right_run_id: "b".into(),
+                chosen_run_id: "a".into(),
+                reason: "短句".into(),
+                left_text: Some("灯灭了。他停住。门开了。".into()),
+                right_text: Some(
+                    "灯光在漫长的沉默中缓慢熄灭，他不得不停下来等待门外的人。".into(),
+                ),
+            },
+        )
+        .unwrap();
+        let far = insert(
+            &loaded.conn,
+            &pid,
+            "claim",
+            json!({"subject":"A","predicate":"备注","description":"灯光在漫长而沉默的夜里缓慢熄灭，他不得不等待一个始终没有出现的人。"}),
+            None,
+            None,
+            0.5,
+        )
+        .unwrap();
+        let close = insert(
+            &loaded.conn,
+            &pid,
+            "claim",
+            json!({"subject":"B","predicate":"备注","description":"灯灭。他停。门开。"}),
+            None,
+            None,
+            0.5,
+        )
+        .unwrap();
+        let listed = list(&loaded.conn, &pid, Some("pending"), None).unwrap();
+        let close_index = listed.iter().position(|item| item.id == close.id).unwrap();
+        let far_index = listed.iter().position(|item| item.id == far.id).unwrap();
+        assert!(close_index < far_index);
     }
 
     #[test]

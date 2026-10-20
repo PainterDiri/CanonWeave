@@ -15,6 +15,7 @@ import {
   type StylePreset,
   type StyleProfile,
   type StyleSample,
+  type PreferenceSummary,
 } from "@/lib/ipc";
 
 export function StylePage() {
@@ -33,17 +34,21 @@ export function StylePage() {
   const [leftText, setLeftText] = useState("");
   const [rightText, setRightText] = useState("");
   const [comparison, setComparison] = useState<StyleCompare | null>(null);
+  const [preferenceSummary, setPreferenceSummary] = useState<PreferenceSummary | null>(null);
+  const [preferenceReason, setPreferenceReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (select?: string) => {
     try {
-      const [presetList, profileList] = await Promise.all([
+      const [presetList, profileList, preferences] = await Promise.all([
         ipc.stylePresets(),
         ipc.styleProfiles(),
+        ipc.preferenceSummary(),
       ]);
       setPresets(presetList);
       setProfiles(profileList);
+      setPreferenceSummary(preferences);
       const next =
         profileList.find((profile) => profile.id === (select ?? selectedId)) ??
         profileList[0] ??
@@ -156,6 +161,32 @@ export function StylePage() {
       setComparison(await ipc.styleCompare(leftText, rightText));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const choosePreference = async (side: "left" | "right") => {
+    if (!comparison || !leftText.trim() || !rightText.trim()) return;
+    setBusy(true);
+    try {
+      const stamp = Date.now();
+      const leftRunId = `manual-left-${stamp}`;
+      const rightRunId = `manual-right-${stamp}`;
+      await ipc.preferenceSave({
+        sceneId: null,
+        leftRunId,
+        rightRunId,
+        chosenRunId: side === "left" ? leftRunId : rightRunId,
+        reason: preferenceReason,
+        leftText,
+        rightText,
+      });
+      const summary = await ipc.preferenceSummary();
+      setPreferenceSummary(summary);
+      setPreferenceReason("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -536,6 +567,34 @@ export function StylePage() {
                   </span>
                 </div>
               ))}
+            </div>
+            <div className="col-span-2 rounded-xl border border-teal/20 bg-teal-soft/30 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] leading-5 text-muted">
+                  选择只写入本地偏好，用于后续检索与同风险候选排序，不训练或微调模型。
+                </div>
+                <Badge tone="teal">{preferenceSummary?.choices ?? 0} 次选择</Badge>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <Input
+                  value={preferenceReason}
+                  onChange={(e) => setPreferenceReason(e.target.value)}
+                  placeholder="选择原因（可选）"
+                />
+                <Button size="sm" onClick={() => void choosePreference("left")} disabled={busy}>
+                  选 A 更好
+                </Button>
+                <Button size="sm" tone="primary" onClick={() => void choosePreference("right")} disabled={busy}>
+                  选 B 更好
+                </Button>
+              </div>
+              {preferenceSummary?.target ? (
+                <div className="mt-2 text-[9px] text-muted">
+                  本地目标：句长 {preferenceSummary.target.avgSentenceLen} · 对话{" "}
+                  {preferenceSummary.target.dialogueRatio}% · 感官{" "}
+                  {preferenceSummary.target.sensoryPer1000}/千字
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}

@@ -24,6 +24,11 @@ mod scenes;
 mod seed;
 mod state;
 mod style;
+mod wiki;
+mod voice;
+mod preferences;
+mod motifs;
+mod export;
 
 use tauri_specta::{collect_commands, Builder};
 use tauri::Manager;
@@ -61,6 +66,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         document_import, document_list, extraction_run, review_queue, candidate_list,
         candidate_accept, candidate_reject, candidate_update_payload, entity_list,
         character_list, character_save, promise_list, promise_save, promise_transition,
+        promise_payoff_check, promise_payoff,
         style_preset_list, style_profile_list, style_profile_get, style_profile_save,
         style_profile_apply_preset, style_sample_add, style_sample_list, style_analyze,
         style_contract_text, style_check, style_compare, style_calibrate
@@ -72,7 +78,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
         issue_list, issue_action, draft_accept_variant
         , revision_list, revision_compare, revision_rollback, preference_save, branch_list,
         branch_create, branch_switch, timeline_data, graph_data, community_build,
-        community_list, impact_analysis, insight_query
+        community_list, impact_analysis, insight_query, wiki_list, wiki_rebuild,
+        wiki_propose_edit, voice_sample_list, voice_sample_add, voice_profile_get,
+        voice_thresholds_save, voice_check, preference_summary, motif_list,
+        motif_density_check, export_project
     ])
 }
 

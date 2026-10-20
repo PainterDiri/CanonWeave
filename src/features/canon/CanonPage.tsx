@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   BookMarked,
+  Download,
   FileText,
   FolderOpen,
   LoaderCircle,
@@ -12,11 +13,18 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, SectionTitle } from "@/components/ui";
-import { ipc, isTauri, type ModelConfig, type RuleRecord, type SourceDocument } from "@/lib/ipc";
+import {
+  ipc,
+  isTauri,
+  type ExportResult,
+  type ModelConfig,
+  type RuleRecord,
+  type SourceDocument,
+} from "@/lib/ipc";
 import { StylePage } from "@/features/style/StylePage";
 import { useAppStore } from "@/stores/ui";
 
-type Tab = "model" | "import" | "style" | "rules";
+type Tab = "model" | "import" | "style" | "rules" | "export";
 
 export function CanonPage({ model }: { model: ModelConfig | null }) {
   const [tab, setTab] = useState<Tab>("model");
@@ -29,6 +37,7 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
           { key: "import" as const, label: "旧稿导入", icon: FileText },
           { key: "style" as const, label: "文笔", icon: Paintbrush },
           { key: "rules" as const, label: "规则", icon: ShieldAlert },
+          { key: "export" as const, label: "导出", icon: Download },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -54,7 +63,93 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
       {tab === "rules" ? (
         <RulesPanel />
       ) : null}
+      {tab === "export" ? <ExportPanel /> : null}
     </div>
+  );
+}
+
+function ExportPanel() {
+  const [includeWiki, setIncludeWiki] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ExportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async (format: "markdown" | "docx") => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await ipc.exportProject({ format, includeWiki }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="paper-card max-w-[760px] p-6">
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+            <Download size={15} className="text-teal" />
+            本地项目导出
+          </div>
+          <p className="mt-1.5 max-w-xl text-[11.5px] leading-6 text-muted">
+            从 SQLite 中的已提交章节生成 Markdown 或 DOCX。文件写入项目目录的 exports/；不会包含 API Key。
+          </p>
+        </div>
+        <Badge tone="teal">本地文件</Badge>
+      </div>
+      <label className="mt-5 flex items-start gap-2 rounded-lg border border-line bg-paper/60 px-3 py-2.5">
+        <input
+          type="checkbox"
+          checked={includeWiki}
+          onChange={(e) => setIncludeWiki(e.target.checked)}
+          className="mt-0.5 accent-teal"
+        />
+        <span className="text-[10.5px] leading-5 text-ink-soft">
+          附加 Narrative Wiki 派生设定页
+          <span className="block text-[9px] text-muted">
+            附录会明确标记“非权威事实”，并保留来源 ID。
+          </span>
+        </span>
+      </label>
+      <div className="mt-5 flex gap-2">
+        <Button
+          tone="primary"
+          onClick={() => void run("markdown")}
+          disabled={busy}
+          icon={busy ? <LoaderCircle size={12} className="animate-spin" /> : <FileText size={12} />}
+        >
+          导出 Markdown
+        </Button>
+        <Button
+          onClick={() => void run("docx")}
+          disabled={busy}
+          icon={busy ? <LoaderCircle size={12} className="animate-spin" /> : <BookMarked size={12} />}
+        >
+          导出 DOCX
+        </Button>
+      </div>
+      {error ? (
+        <div className="mt-4 rounded-lg border border-coral/20 bg-coral-soft/50 px-3.5 py-2.5 text-[10.5px] text-coral">
+          {error}
+        </div>
+      ) : null}
+      {result ? (
+        <div className="mt-4 rounded-lg border border-teal/20 bg-teal-soft/40 px-3.5 py-3">
+          <div className="text-[10px] font-medium text-teal">
+            已导出 {result.chapters} 章 · {result.words} 字 · {result.format.toUpperCase()}
+          </div>
+          <div className="mt-1 break-all font-mono text-[9px] leading-5 text-ink-soft">
+            {result.path}
+          </div>
+          {result.includesWiki ? (
+            <div className="mt-1 text-[9px] text-muted">含派生设定附录，不替代正文与权威事实。</div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

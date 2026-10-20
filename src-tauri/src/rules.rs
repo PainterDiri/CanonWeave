@@ -820,7 +820,7 @@ mod tests {
 
     fn setup() -> (tempfile::TempDir, crate::project::LoadedProject) {
         let dir = tempfile::tempdir().unwrap();
-        let mut loaded = project::create(&crate::domain::CreateProjectInput {
+        let loaded = project::create(&crate::domain::CreateProjectInput {
             name: "t".into(),
             root_path: dir.path().join("p").to_string_lossy().into_owned(),
             mode: "both".into(),

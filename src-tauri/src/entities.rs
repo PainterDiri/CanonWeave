@@ -155,6 +155,7 @@ pub fn save_character(
             ts
         ],
     )?;
+    crate::graphrag::mark_stale(&tx, project_id)?;
     tx.commit()?;
     get_character(conn, project_id, &entity_id)
 }

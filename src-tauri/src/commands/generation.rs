@@ -224,8 +224,17 @@ pub fn generation_start(
                     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
                     let use_refined = mode_for_task == "refined" && !refined_text.is_empty();
                     let candidate_kind = if use_refined { "draft_refined" } else { "draft" };
+                    let selected_text = if use_refined { &refined_text } else { &raw_text };
+                    let motif_hints = crate::motifs::check(
+                        &loaded.conn,
+                        &project_for_task,
+                        &scene_for_task,
+                        selected_text,
+                    )
+                    .map(|check| check.hints)
+                    .unwrap_or_default();
                     let payload = json!({
-                        "text": if use_refined { &refined_text } else { &raw_text },
+                        "text": selected_text,
                         "rawText": raw_text.clone(),
                         "refinedText": refined_text.clone(),
                         "sceneId": scene_for_task.clone(),
@@ -241,6 +250,7 @@ pub fn generation_start(
                         },
                         "factDelta": delta.clone(),
                         "styleCheck": style_report,
+                        "motifHints": motif_hints,
                         "refinedError": refined_error.clone(),
                         "possibleInflation": delta.possible_inflation
                     });

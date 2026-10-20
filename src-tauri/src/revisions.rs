@@ -1,9 +1,9 @@
 use rusqlite::{params, Connection};
 
 use crate::{
-    domain::{DraftAcceptResult, PreferenceInput, RevisionCompare, RevisionRecord},
+    domain::{DraftAcceptResult, RevisionCompare, RevisionRecord},
     error::{AppError, AppResult},
-    now, scenes,
+    scenes,
 };
 
 pub fn list(
@@ -41,7 +41,6 @@ pub fn list(
     drop(stmt);
     Ok(rows)
 }
-
 fn snapshot_text(conn: &Connection, project_id: &str, revision_id: &str) -> AppResult<String> {
     conn.query_row(
         "SELECT s.content FROM revision r JOIN snapshot s ON s.id=r.snapshot_id
@@ -99,27 +98,4 @@ pub fn rollback(
         &text,
         &format!("rollback:{revision_id}"),
     )
-}
-
-pub fn save_preference(
-    conn: &Connection,
-    project_id: &str,
-    input: &PreferenceInput,
-) -> AppResult<()> {
-    conn.execute(
-        "INSERT INTO preference (id, project_id, scene_id, left_run_id, right_run_id,
-            chosen_run_id, reason, dimension_scores, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,'{}',?8)",
-        params![
-            uuid::Uuid::new_v4().to_string(),
-            project_id,
-            input.scene_id,
-            input.left_run_id,
-            input.right_run_id,
-            input.chosen_run_id,
-            input.reason,
-            now()
-        ],
-    )?;
-    Ok(())
 }

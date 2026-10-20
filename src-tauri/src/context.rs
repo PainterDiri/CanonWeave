@@ -134,7 +134,7 @@ fn evidence_block(
         scene.pov,
         due_titles
     );
-    let hits = retrieval::search(conn, project_id, &query, 8)?;
+    let hits = retrieval::search_for_scene(conn, project_id, &query, 8, Some(&scene.id))?;
     let pov_id = retrieval::entity_id_by_name(conn, project_id, &scene.pov)?;
     let mut seeds = Vec::new();
     if let Some(id) = pov_id {
@@ -179,6 +179,10 @@ fn voice_block(
 ) -> AppResult<String> {
     let mut parts = Vec::new();
     if let Some(entity_id) = retrieval::entity_id_by_name(conn, project_id, &scene.pov)? {
+        let applied_samples = crate::voice::context_anchor(conn, project_id, &entity_id, 1200)?;
+        if !applied_samples.trim().is_empty() {
+            parts.push(format!("[POV 人物声音样本与可解释指标]\n{applied_samples}"));
+        }
         if let Ok(anchor) = conn.query_row(
             "SELECT voice_anchor, desire, fear FROM character_core WHERE entity_id=?1",
             [&entity_id],
@@ -190,7 +194,7 @@ fn voice_block(
                 ))
             },
         ) {
-            if !anchor.0.trim().is_empty() {
+            if !anchor.0.trim().is_empty() && applied_samples.trim().is_empty() {
                 parts.push(format!(
                     "[POV 声音锚点]\n{}",
                     clip(&anchor.0, 900)
@@ -290,7 +294,7 @@ pub fn compile(
                 )
             }
             "L2" => claims_for_layer(conn, project_id, "L2", &scene.pov, branch.as_deref())?,
-            "L3" => "叙事百科尚未编译。本层只提供导航占位，不得替代原文证据。".into(),
+            "L3" => crate::wiki::context_index(conn, project_id)?,
             "L4" => promises.clone(),
             "L5" => evidence_block(conn, project_id, &scene, &due_titles)?,
             "L6" => voice_block(conn, project_id, &scene, style_override)?,

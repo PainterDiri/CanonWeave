@@ -166,4 +166,6 @@ pub struct PreferenceInput {
     pub right_run_id: String,
     pub chosen_run_id: String,
     pub reason: String,
+    pub left_text: Option<String>,
+    pub right_text: Option<String>,
 }

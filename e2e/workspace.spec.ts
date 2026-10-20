@@ -174,7 +174,9 @@ async function installMock(page: import("@playwright/test").Page) {
             case "chat_candidates":
               return [candidate, candidate2];
             case "candidate_list":
-              return args?.kind === "draft" ? [] : [candidate, candidate2];
+              return args?.kind === "draft" || args?.kind === "wiki_edit"
+                ? []
+                : [candidate, candidate2];
             case "chapter_list":
               return chapters;
             case "branch_list":
@@ -383,6 +385,49 @@ async function installMock(page: import("@playwright/test").Page) {
                   voiceAnchor: "“先别下结论。把信给我。”",
                 },
               ];
+            case "voice_sample_list":
+              return [
+                {
+                  id: "vs1",
+                  characterId: "e1",
+                  text: "林澈说：“先别下结论。把信给我。”",
+                  sourceSpan: "作者样本 1",
+                  sourceType: "author",
+                  metrics: {
+                    avgSentenceLen: 12,
+                    sentenceVariance: 4,
+                    punctuationPer100: 6,
+                    pronounRatio: 4,
+                    dialogueActionRatio: 30,
+                    dialogueRatio: 48,
+                    preferredPronoun: "我",
+                  },
+                  createdAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "voice_profile_get":
+              return {
+                characterId: "e1",
+                centroid: {
+                  avgSentenceLen: 12,
+                  sentenceVariance: 4,
+                  punctuationPer100: 6,
+                  pronounRatio: 4,
+                  dialogueActionRatio: 30,
+                  dialogueRatio: 48,
+                  preferredPronoun: "我",
+                },
+                thresholds: {
+                  sentenceLen: 10,
+                  sentenceVariance: 12,
+                  punctuation: 5,
+                  pronoun: 6,
+                  dialogueAction: 25,
+                },
+                sampleCount: 1,
+                version: 1,
+                updatedAt: "2026-10-20T08:00:00Z",
+              };
             case "promise_list":
               return [
                 {
@@ -422,6 +467,64 @@ async function installMock(page: import("@playwright/test").Page) {
               ];
             case "entity_list":
               return [];
+            case "wiki_list":
+              return [
+                {
+                  id: "wiki1",
+                  entityId: "e1",
+                  kind: "character",
+                  title: "林澈",
+                  content:
+                    "派生视图 · 非权威事实。事实变更后本页会标记过期，并可全量重建。\n\n## 人物核心\n- 欲望：证明父亲的死并非意外\n- 恐惧：发现自己和父亲一样擅长撒谎\n\n## 已确认事实\n- [world] 林澈 · 持有 · 旧钥匙（ch01:p3）",
+                  contentHash: "abcdef1234567890",
+                  sourceIds: ["e1", "c1"],
+                  sourceSpans: ["ch01:p3｜林澈握住旧钥匙"],
+                  generatorVersion: 1,
+                  editedByAuthor: false,
+                  generatedAt: "2026-10-20T08:00:00Z",
+                  staleAt: null,
+                },
+                {
+                  id: "wiki2",
+                  entityId: null,
+                  kind: "timeline",
+                  title: "双时间线",
+                  content:
+                    "派生视图 · 非权威事实。\n\n## 事件\n- 葬礼当夜｜故事时间第1日 23:00｜叙述时间第1章",
+                  contentHash: "fedcba0987654321",
+                  sourceIds: ["ev1"],
+                  sourceSpans: ["ch01:p1｜林澈收到下周寄出的信"],
+                  generatorVersion: 1,
+                  editedByAuthor: false,
+                  generatedAt: "2026-10-20T08:00:00Z",
+                  staleAt: "2026-10-20T08:30:00Z",
+                },
+              ];
+            case "preference_summary":
+              return {
+                choices: 1,
+                target: {
+                  avgSentenceLen: 14,
+                  dialogueRatio: 24,
+                  sensoryPer1000: 9,
+                  metaphorPer1000: 2,
+                  adverbPer1000: 5,
+                },
+              };
+            case "motif_density_check":
+              return {
+                chars: 120,
+                motifs: [],
+                hints: [],
+              };
+            case "export_project":
+              return {
+                path: "/Users/writer/Stories/rain-night/exports/rain-night.md",
+                format: args?.input?.format ?? "markdown",
+                chapters: 10,
+                words: 23400,
+                includesWiki: true,
+              };
             case "app_info":
               return { name: "CanonWeave", version: "0.1.0", schemaVersion: 1 };
             case "plugin:event|listen":
@@ -469,12 +572,20 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.screenshot({ path: path.join("test-results", "audit.png") });
 
   await page.getByRole("button", { name: "人物", exact: true }).click();
+  await expect(page.getByText("人物声音指纹")).toBeVisible();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "characters.png") });
 
   await page.getByRole("button", { name: "伏笔", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "promises.png") });
+
+  await page.getByRole("button", { name: "百科", exact: true }).click();
+  await expect(page.getByText("Narrative Wiki Compiler")).toBeVisible();
+  await expect(page.getByText("作者修改") /* no pending fixture */).toHaveCount(0);
+  await expect(page.getByText("林澈", { exact: true }).first()).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: path.join("test-results", "wiki.png") });
 
   await page.getByRole("button", { name: "正文", exact: true }).click();
   await page.waitForTimeout(450);
@@ -484,6 +595,12 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "文笔", exact: true }).click();
   await page.waitForTimeout(450);
   await page.screenshot({ path: path.join("test-results", "style.png") });
+
+  await page.getByRole("button", { name: "导出", exact: true }).click();
+  await page.getByRole("button", { name: "导出 Markdown" }).click();
+  await expect(page.getByText(/已导出 10 章/)).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join("test-results", "export.png") });
 
   await page.getByRole("button", { name: "时间线", exact: true }).click();
   await page.waitForTimeout(500);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Feather, LoaderCircle, Plus, ShieldCheck } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
-import { ipc, type PromiseRecord } from "@/lib/ipc";
+import { ipc, type PayoffCheck, type PromiseRecord } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 
 const stateMeta: Record<string, { label: string; tone: "neutral" | "teal" | "amber" | "coral" }> = {
@@ -18,7 +18,10 @@ export function PromisesPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<{ id: string | null; title: string; targetWindow: string; payoffContract: string } | null>(null);
   const [payoff, setPayoff] = useState<PromiseRecord | null>(null);
-  const [evidence, setEvidence] = useState("");
+  const [sourceId, setSourceId] = useState("");
+  const [quote, setQuote] = useState("");
+  const [stateChange, setStateChange] = useState("");
+  const [payoffCheck, setPayoffCheck] = useState<PayoffCheck | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refreshProject = useAppStore((s) => s.refreshProject);
 
@@ -57,7 +60,47 @@ export function PromisesPage() {
     try {
       await ipc.promiseTransition({ id: promise.id, state, evidence });
       setPayoff(null);
-      setEvidence("");
+      await load();
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const openPayoff = (promise: PromiseRecord) => {
+    setPayoff(promise);
+    setSourceId("");
+    setQuote("");
+    setStateChange("");
+    setPayoffCheck(null);
+  };
+
+  const checkPayoff = async () => {
+    if (!payoff) return;
+    try {
+      setPayoffCheck(
+        await ipc.promisePayoffCheck({
+          id: payoff.id,
+          sourceId,
+          quote,
+          stateChange,
+        }),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const confirmPayoff = async () => {
+    if (!payoff) return;
+    try {
+      await ipc.promisePayoff({
+        id: payoff.id,
+        sourceId,
+        quote,
+        stateChange,
+      });
+      setPayoff(null);
       await load();
       await refreshProject();
     } catch (e) {
@@ -179,7 +222,7 @@ export function PromisesPage() {
                       <Button
                         size="sm"
                         tone="primary"
-                        onClick={() => setPayoff(promise)}
+                        onClick={() => openPayoff(promise)}
                         icon={<ShieldCheck size={12} />}
                       >
                         兑现
@@ -258,24 +301,47 @@ export function PromisesPage() {
             <Button tone="ghost" onClick={() => setPayoff(null)}>
               取消
             </Button>
-            <Button
-              tone="primary"
-              disabled={!evidence.trim()}
-              onClick={() => payoff && void transition(payoff, "paid_off", evidence)}
-            >
+            <Button onClick={() => void checkPayoff()} disabled={!sourceId.trim() || !quote.trim()}>
+              验证证据
+            </Button>
+            <Button tone="primary" onClick={() => void confirmPayoff()} disabled={!payoffCheck?.ready}>
               确认兑现
             </Button>
           </>
         }
       >
-        <Field label="新兑现证据" hint="章节、原文片段或状态变化">
-          <Textarea
-            rows={4}
-            value={evidence}
-            onChange={(e) => setEvidence(e.target.value)}
-            placeholder="例如：第 9 章，林澈打开父亲的旧箱子，读出信末的日期。"
-          />
-        </Field>
+        <div className="space-y-3">
+          <Field label="新证据来源 ID" hint="例如 chapter:ch09 / scene:... / import:...">
+            <Input value={sourceId} onChange={(e) => setSourceId(e.target.value)} />
+          </Field>
+          <Field label="可回查原文片段" hint="至少 8 字；只写关键词不算兑现">
+            <Textarea
+              rows={3}
+              value={quote}
+              onChange={(e) => setQuote(e.target.value)}
+              placeholder="例如：林澈把钥匙插进抽屉，认出铜齿上刻着父亲的名字。"
+            />
+          </Field>
+          <Field label="读者或故事状态变化" hint="揭示信息 / 改变认知 / 交付物品 / 触发事件">
+            <Textarea
+              rows={3}
+              value={stateChange}
+              onChange={(e) => setStateChange(e.target.value)}
+              placeholder="例如：林澈改变了对父亲的判断，确认钥匙不是伪造的。"
+            />
+          </Field>
+          {payoffCheck ? (
+            <div className={`rounded-lg border px-3 py-2 text-[10px] leading-5 ${
+              payoffCheck.ready
+                ? "border-teal/20 bg-teal-soft/50 text-teal"
+                : "border-amber/30 bg-amber-soft/50 text-amber"
+            }`}>
+              {payoffCheck.ready
+                ? "证据链完整：已有原埋设证据、新定位片段与状态变化。"
+                : payoffCheck.blockers.join("；")}
+            </div>
+          ) : null}
+        </div>
       </Modal>
     </div>
   );

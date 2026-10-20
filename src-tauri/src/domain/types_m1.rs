@@ -312,6 +312,9 @@ pub struct PromiseRecord {
     pub target_window: String,
     pub payoff_contract: String,
     pub evidence_ids: Vec<String>,
+    pub plant_evidence_ids: Vec<String>,
+    pub payoff_evidence_ids: Vec<String>,
+    pub payoff_state_change: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -331,6 +334,25 @@ pub struct PromiseStateInput {
     pub id: String,
     pub state: String,
     pub evidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PromisePayoffInput {
+    pub id: String,
+    pub source_id: String,
+    pub quote: String,
+    pub state_change: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PayoffCheck {
+    pub ready: bool,
+    pub blockers: Vec<String>,
+    pub plant_evidence_ids: Vec<String>,
+    pub payoff_evidence_ids: Vec<String>,
+    pub state_change: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

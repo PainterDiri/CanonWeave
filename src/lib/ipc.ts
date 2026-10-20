@@ -17,6 +17,11 @@ import {
   type ReviewPolicyInput,
   type IssueActionInput,
   type PreferenceInput,
+  type WikiEditInput,
+  type VoiceSampleInput,
+  type VoiceThresholdInput,
+  type PromisePayoffInput,
+  type ExportInput,
 } from "./bindings";
 
 export type {
@@ -32,6 +37,8 @@ export type {
   CharacterInput,
   PromiseInput,
   PromiseStateInput,
+  PromisePayoffInput,
+  PayoffCheck,
   ChatSessionCreateInput,
   CandidateCaptureInput,
   PromiseRecord,
@@ -68,6 +75,23 @@ export type {
   CommunityReport,
   InsightResult,
   ImpactSet,
+  WikiPage,
+  WikiRebuildResult,
+  WikiEditInput,
+  CharacterVoiceSample,
+  CharacterVoiceProfile,
+  VoiceCheck,
+  VoiceSampleInput,
+  VoiceThresholdInput,
+  VoiceThresholds,
+  VoiceDimensions,
+  PreferenceSummary,
+  PreferenceTarget,
+  MotifRecord,
+  MotifCheck,
+  MotifHint,
+  ExportInput,
+  ExportResult,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -226,6 +250,10 @@ export const ipc = {
     guarded(async () => unwrap(await commands.promiseSave(input))),
   promiseTransition: (input: PromiseStateInput) =>
     guarded(async () => unwrap(await commands.promiseTransition(input))),
+  promisePayoffCheck: (input: PromisePayoffInput) =>
+    guarded(async () => unwrap(await commands.promisePayoffCheck(input))),
+  promisePayoff: (input: PromisePayoffInput) =>
+    guarded(async () => unwrap(await commands.promisePayoff(input))),
 
   stylePresets: () => guarded(async () => commands.stylePresetList()),
   styleProfiles: () => guarded(async () => unwrap(await commands.styleProfileList())),
@@ -339,6 +367,27 @@ export const ipc = {
     guarded(async () => unwrap(await commands.impactAnalysis(entityId))),
   insightQuery: (question: string) =>
     guarded(async () => unwrap(await commands.insightQuery(question))),
+  wikiList: () => guarded(async () => unwrap(await commands.wikiList())),
+  wikiRebuild: () => guarded(async () => unwrap(await commands.wikiRebuild())),
+  wikiProposeEdit: (input: WikiEditInput) =>
+    guarded(async () => unwrap(await commands.wikiProposeEdit(input))),
+  voiceSamples: (characterId: string) =>
+    guarded(async () => unwrap(await commands.voiceSampleList(characterId))),
+  voiceSampleAdd: (input: VoiceSampleInput) =>
+    guarded(async () => unwrap(await commands.voiceSampleAdd(input))),
+  voiceProfile: (characterId: string) =>
+    guarded(async () => unwrap(await commands.voiceProfileGet(characterId))),
+  voiceThresholdsSave: (input: VoiceThresholdInput) =>
+    guarded(async () => unwrap(await commands.voiceThresholdsSave(input))),
+  voiceCheck: (characterId: string, text: string, sceneId: string | null = null) =>
+    guarded(async () => unwrap(await commands.voiceCheck(characterId, text, sceneId))),
+  preferenceSummary: (sceneId: string | null = null) =>
+    guarded(async () => unwrap(await commands.preferenceSummary(sceneId))),
+  motifList: () => guarded(async () => unwrap(await commands.motifList())),
+  motifDensityCheck: (sceneId: string, text: string) =>
+    guarded(async () => unwrap(await commands.motifDensityCheck(sceneId, text))),
+  exportProject: (input: ExportInput) =>
+    guarded(async () => unwrap(await commands.exportProject(input))),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };

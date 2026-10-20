@@ -38,11 +38,12 @@ pub fn fts_query(query: &str) -> String {
     }
 }
 
-pub fn search(
+pub fn search_for_scene(
     conn: &Connection,
     project_id: &str,
     query: &str,
     limit: usize,
+    scene_id: Option<&str>,
 ) -> AppResult<Vec<SearchHit>> {
     if query.trim().is_empty() {
         return Ok(vec![]);
@@ -75,15 +76,41 @@ pub fn search(
     let best = raw.iter().map(|(_, _, _, rank)| *rank).fold(f64::INFINITY, f64::min);
     let worst = raw.iter().map(|(_, _, _, rank)| *rank).fold(f64::NEG_INFINITY, f64::max);
     let span = (worst - best).abs().max(0.0001);
-    Ok(raw
+    let preference = crate::preferences::targets(conn, project_id, scene_id)?;
+    let mut ranked = raw
         .into_iter()
-        .map(|(source_id, chapter_id, excerpt, rank)| SearchHit {
-            source_id,
-            chapter_id,
-            excerpt,
-            score: (((worst - rank) / span) * 100.0).round().clamp(0.0, 100.0) as i32,
+        .map(|(source_id, chapter_id, excerpt, rank)| {
+            let lexical = if (worst - best).abs() < 0.0001 {
+                100.0
+            } else {
+                (((worst - rank) / span) * 100.0).clamp(0.0, 100.0)
+            };
+            let preference_score = preference
+                .as_ref()
+                .map(|target| crate::preferences::score_with_target(&excerpt, target))
+                .unwrap_or(0.0);
+            let combined = if preference.is_some() {
+                lexical * 0.8 + preference_score * 0.2
+            } else {
+                lexical
+            };
+            (
+                SearchHit {
+                    source_id,
+                    chapter_id,
+                    excerpt,
+                    score: combined.round().clamp(0.0, 100.0) as i32,
+                },
+                combined,
+            )
         })
-        .collect())
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.0.score.cmp(&a.0.score))
+    });
+    Ok(ranked.into_iter().map(|(hit, _)| hit).collect())
 }
 
 /// 在实体图上运行 Personalized PageRank。边来自关系与同层事实中的实体连接。

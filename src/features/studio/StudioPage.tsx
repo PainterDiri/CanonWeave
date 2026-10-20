@@ -28,6 +28,7 @@ import {
   type ChapterRecord,
   type ContextPreview,
   type GenerationRunRow,
+  type MotifHint,
   type RevisionRecord,
   type SceneRecord,
   type StyleCheck,
@@ -90,6 +91,7 @@ export function StudioPage() {
   const [sceneForm, setSceneForm] = useState<SceneForm | null>(null);
   const [context, setContext] = useState<ContextPreview | null>(null);
   const [styleReport, setStyleReport] = useState<StyleCheck | null>(null);
+  const [motifHints, setMotifHints] = useState<MotifHint[]>([]);
   const [instruction, setInstruction] = useState("");
   const [styleOverride, setStyleOverride] = useState("");
   const [generationMode, setGenerationMode] = useState<"quick" | "refined">("quick");
@@ -123,6 +125,7 @@ export function StudioPage() {
     setRevisions(revisionList);
     setOutput("");
     setStyleReport(null);
+    setMotifHints([]);
   }, []);
 
   useEffect(() => {
@@ -204,6 +207,7 @@ export function StudioPage() {
     setStreaming("");
     streamRef.current = "";
     setStyleReport(null);
+    setMotifHints([]);
     try {
       const result = await ipc.generationStart({
         sceneId: currentScene.id,
@@ -244,14 +248,22 @@ export function StudioPage() {
 
   const checkStyle = async () => {
     const profileId = styleOverride || currentScene?.styleProfileId || styles[0]?.id;
-    if (!profileId || !output) {
-      setError("需要先有正文和文笔档案");
+    if (!output || !currentScene) {
+      setError("需要先有正文和场景契约");
       return;
     }
+    setBusy(true);
     try {
-      setStyleReport(await ipc.styleCheck(output, profileId));
+      const [style, motifs] = await Promise.all([
+        profileId ? ipc.styleCheck(output, profileId) : Promise.resolve(null),
+        ipc.motifDensityCheck(currentScene.id, output),
+      ]);
+      setStyleReport(style);
+      setMotifHints(motifs.hints);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -767,7 +779,7 @@ export function StudioPage() {
               </div>
             </section>
 
-            <section className="paper-card max-h-[190px] overflow-y-auto p-3.5">
+            <section className="paper-card max-h-[270px] overflow-y-auto p-3.5">
               <div className="mb-2 flex items-center justify-between text-[10.5px] font-semibold text-ink-soft">
                 <span>文笔漂移</span>
                 <span className="text-[9px] text-muted">{styleReport ? `${styleReport.drifts.length} 项` : "未检查"}</span>
@@ -793,6 +805,19 @@ export function StudioPage() {
               ) : (
                 <div className="text-[9.5px] leading-4 text-muted">生成后运行检查，只提示不自动改写。</div>
               )}
+              {motifHints.length ? (
+                <div className="mt-3 border-t border-line pt-2">
+                  <div className="mb-1 text-[9.5px] font-medium text-amber">母题密度</div>
+                  {motifHints.slice(0, 3).map((hint) => (
+                    <div key={`${hint.motif}-${hint.count}`} className="mb-1 text-[8.5px] leading-4 text-muted">
+                      <span className={hint.severity === "major" ? "text-coral" : "text-amber"}>
+                        {hint.motif}
+                      </span>
+                      <span> {hint.message}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </section>
 
             <section className="paper-card p-3.5">

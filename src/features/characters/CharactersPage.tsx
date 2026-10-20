@@ -3,6 +3,7 @@ import { LoaderCircle, Plus, Sparkles, UserRound } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
 import { ipc, type CharacterDetail } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
+import { VoicePanel } from "@/features/characters/VoicePanel";
 
 type Draft = {
   entityId: string | null;
@@ -225,6 +226,7 @@ export function CharactersPage() {
                     {current.voiceAnchor || "还没有样本。之后贴入 3 至 8 段作者认可的对话，用于声音漂移检查。"}
                   </p>
                 </div>
+                <VoicePanel characterId={current.entity.id} />
                 {current.values.length ? (
                   <div className="mt-4 flex flex-wrap gap-1.5">
                     {current.values.map((value) => (

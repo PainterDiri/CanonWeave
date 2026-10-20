@@ -53,6 +53,6 @@ pub fn preference_save(
     input: PreferenceInput,
 ) -> IpcResult<()> {
     state
-        .with_project(|loaded| revisions::save_preference(&loaded.conn, &loaded.summary.id, &input))
+        .with_project(|loaded| crate::preferences::save(&loaded.conn, &loaded.summary.id, &input))
         .map_err(|e| e.to_string())
 }
