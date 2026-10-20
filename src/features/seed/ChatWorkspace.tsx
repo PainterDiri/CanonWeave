@@ -15,7 +15,9 @@ import { Badge, Button, Textarea } from "@/components/ui";
 import {
   ipc,
   onChatDelta,
+  type BeatOption,
   type Candidate,
+  type ChapterRecord,
   type ChatMessage,
   type ChatSession,
   type Premise,
@@ -44,6 +46,11 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
   const [active, setActive] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [chapters, setChapters] = useState<ChapterRecord[]>([]);
+  const [chapterId, setChapterId] = useState<string>("");
+  const [beats, setBeats] = useState<BeatOption[]>([]);
+  const [beatInstruction, setBeatInstruction] = useState("");
+  const [beatBusy, setBeatBusy] = useState(false);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
   const [sending, setSending] = useState(false);
@@ -52,6 +59,7 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
   const requestRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const refreshProject = useAppStore((s) => s.refreshProject);
+  const notify = useAppStore((s) => s.notify);
 
   const loadSessions = useCallback(async (selectId?: string) => {
     const list = await ipc.chatSessions(null);
@@ -75,7 +83,12 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
   useEffect(() => {
     (async () => {
       try {
-        const list = await ipc.chatSessions(null);
+        const [list, chapterList] = await Promise.all([
+          ipc.chatSessions(null),
+          ipc.chapters().catch(() => []),
+        ]);
+        setChapters(chapterList);
+        setChapterId(chapterList[0]?.id ?? "");
         let first = list[0];
         if (!first) {
           first = await ipc.chatCreate({
@@ -210,6 +223,7 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
       const pending = await ipc.chatCandidates(active.id);
       setCandidates(pending.filter((c) => c.status === "pending"));
       await refreshProject();
+      notify("已加入候选区");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -251,6 +265,54 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
     if (!window.confirm("删除这个会话？消息会被删除，但已确认事实与候选不会受影响。")) return;
     await ipc.chatDelete(active.id);
     await loadSessions();
+  };
+
+  const generateBeats = async () => {
+    if (!active || !beatInstruction.trim()) return;
+    setBeatBusy(true);
+    setError(null);
+    try {
+      const result = await ipc.plotBeats(active.id, beatInstruction.trim());
+      setBeats(result);
+      await loadActive(active);
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBeatBusy(false);
+    }
+  };
+
+  const continueWrite = async () => {
+    if (!active) return;
+    setBeatBusy(true);
+    try {
+      await ipc.chatContinue(active.id);
+      setCandidates(await ipc.chatCandidates(active.id));
+      await refreshProject();
+      notify("续写草稿已进入候选区（500–800 字）");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBeatBusy(false);
+    }
+  };
+
+  const toScene = async () => {
+    if (!active || !chapterId) {
+      setError("请先在骨架中确认章节，再写成场景");
+      return;
+    }
+    setBeatBusy(true);
+    try {
+      await ipc.chatToScene(active.id, chapterId);
+      notify("场景契约已生成，请到正文工坊查看");
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBeatBusy(false);
+    }
   };
 
   if (loading) {
@@ -395,6 +457,52 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
         </div>
 
         <div className="border-t border-line px-4 py-3">
+          {active?.mode === "plot" || beats.length > 0 ? (
+            <div className="mb-2.5 rounded-lg border border-amber/20 bg-amber-soft/30 px-3 py-2.5">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-[10px] font-semibold text-amber">推进剧情 · 先给节拍，不写整章</span>
+                <input
+                  value={beatInstruction}
+                  onChange={(e) => setBeatInstruction(e.target.value)}
+                  placeholder="下一场你想发生什么？"
+                  className="h-7 flex-1 rounded-md border border-line bg-paper-raised px-2 text-[10.5px] outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void generateBeats();
+                  }}
+                />
+                <Button size="sm" tone="ghost" onClick={() => void generateBeats()} disabled={beatBusy}>
+                  {beatBusy ? <LoaderCircle size={11} className="animate-spin" /> : null}
+                  三个节拍
+                </Button>
+              </div>
+              {beats.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {beats.map((beat, index) => (
+                    <div key={beat.title} className="rounded-md border border-line bg-paper-raised p-2">
+                      <div className="text-[9.5px] font-semibold text-ink">
+                        {String.fromCharCode(65 + index)} · {beat.title}
+                      </div>
+                      <div className="mt-1 line-clamp-3 text-[9px] leading-4 text-muted">{beat.beat}</div>
+                      <button
+                        onClick={() =>
+                          void ipc
+                            .sceneFromBeat(chapterId, beat)
+                            .then(() => notify("场景契约已建立，可在正文工坊查看"))
+                            .catch((e: unknown) =>
+                              setError(e instanceof Error ? e.message : String(e)),
+                            )
+                        }
+                        disabled={!chapterId}
+                        className="mt-1.5 text-[9px] text-teal hover:underline disabled:text-muted"
+                      >
+                        写成场景 →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {error ? <div className="mb-2 text-[11px] leading-5 text-coral">{error}</div> : null}
           <div className="relative">
             <Textarea
@@ -432,6 +540,34 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
             <span>对话不会自动写入正文或权威库</span>
             <span className="h-0.5 w-0.5 rounded-full bg-muted/50" />
             <span>超过 12 轮建议先写第一场或生成骨架</span>
+            <span className="ml-auto flex items-center gap-1.5">
+              <select
+                value={chapterId}
+                onChange={(e) => setChapterId(e.target.value)}
+                className="rounded border border-line bg-paper-raised px-1.5 py-0.5 text-[9px]"
+              >
+                <option value="">选择章节</option>
+                {chapters.map((chapter) => (
+                  <option key={chapter.id} value={chapter.id}>
+                    第 {chapter.number} 章 {chapter.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => void continueWrite()}
+                disabled={beatBusy}
+                className="rounded border border-line px-1.5 py-0.5 hover:border-teal/40 hover:text-teal disabled:opacity-50"
+              >
+                继续写 500–800 字
+              </button>
+              <button
+                onClick={() => void toScene()}
+                disabled={beatBusy || !chapterId}
+                className="rounded border border-line px-1.5 py-0.5 hover:border-teal/40 hover:text-teal disabled:opacity-50"
+              >
+                写成场景
+              </button>
+            </span>
           </div>
         </div>
       </section>

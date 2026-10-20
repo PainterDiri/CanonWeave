@@ -1,6 +1,7 @@
 mod commands;
 mod candidates;
 mod chat;
+mod context;
 mod db;
 mod domain;
 mod entities;
@@ -12,8 +13,10 @@ mod outline;
 mod project;
 mod promises;
 mod retrieval;
+mod scenes;
 mod seed;
 mod state;
+mod style;
 
 use tauri_specta::{collect_commands, Builder};
 use tauri::Manager;
@@ -50,7 +53,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
         outline_generate, outline_update, outline_confirm, outline_drop, outline_status,
         document_import, document_list, extraction_run, review_queue, candidate_list,
         candidate_accept, candidate_reject, candidate_update_payload, entity_list,
-        character_list, character_save, promise_list, promise_save, promise_transition
+        character_list, character_save, promise_list, promise_save, promise_transition,
+        style_preset_list, style_profile_list, style_profile_get, style_profile_save,
+        style_profile_apply_preset, style_sample_add, style_sample_list, style_analyze,
+        style_contract_text, style_check, style_compare, style_calibrate
+        , chapter_list, scene_list, scene_save, scene_contract_text, context_preview,
+        chapter_text_get, draft_accept, generation_start, generation_cancel, generation_runs,
+        plot_beats, scene_from_beat, chat_continue, chat_to_scene, review_batch_preview,
+        review_batch_apply, chapter_text_save
     ])
 }
 

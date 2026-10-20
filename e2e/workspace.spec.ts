@@ -102,7 +102,7 @@ async function installMock(page: import("@playwright/test").Page) {
       let callbackId = 1;
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => callbackId++,
-        invoke: async (cmd: string) => {
+        invoke: async (cmd: string, args?: any) => {
           switch (cmd) {
             case "project_state":
               return project;
@@ -171,8 +171,88 @@ async function installMock(page: import("@playwright/test").Page) {
                 },
               ];
             case "chat_candidates":
-            case "candidate_list":
               return [candidate, candidate2];
+            case "candidate_list":
+              return args?.kind === "draft" ? [] : [candidate, candidate2];
+            case "chapter_list":
+              return chapters;
+            case "chapter_text_get":
+              return "雨落在旧灯上。\n\n林澈把信摊在掌心，纸页的边缘被水汽泡得发软。母亲站在门口，没有进来，也没有说话。\n\n他听见楼下有人在喊父亲的名字。";
+            case "scene_list":
+              return [
+                {
+                  id: "sc1",
+                  chapterId: "o1",
+                  number: 1,
+                  goal: "在封棺前拿到那封下周寄出的信",
+                  conflict: "母亲坚持立刻结束葬礼，守夜人拒绝让路。",
+                  pov: "林澈",
+                  storyTime: "葬礼当夜，十一点",
+                  branchId: null,
+                  placeId: null,
+                  styleProfileId: "style1",
+                  emotionBeat: {
+                    target: "压抑",
+                    intensity: 4,
+                    entry: "麻木",
+                    exit: "动摇",
+                    turn: "信纸是空白的",
+                  },
+                  sensoryPlan: {
+                    channels: ["嗅觉", "触觉"],
+                    motifs: ["雨", "旧纸"],
+                    distance: "近景",
+                  },
+                  status: "planned",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "style_profile_list":
+              return [
+                {
+                  id: "style1",
+                  scope: "project",
+                  scopeId: null,
+                  name: "冷峻克制",
+                  pov: "第三人称限知",
+                  person: "第三人称",
+                  tense: "过去时",
+                  syntax: {
+                    avgSentenceMin: 16,
+                    avgSentenceMax: 24,
+                    shortRatio: 38,
+                    paragraphSentencesMin: 3,
+                    paragraphSentencesMax: 5,
+                  },
+                  lexicon: {
+                    concreteRatio: 70,
+                    register: "克制",
+                    adverbDensityMax: 6,
+                    bannedWords: ["仿佛", "似乎"],
+                  },
+                  imagery: {
+                    sensoryChannels: ["视觉", "触觉"],
+                    motifs: ["雨", "旧灯"],
+                    sensoryPer1000: 8,
+                  },
+                  rhetoric: { metaphorPer1000: 2, irony: 10, minimalism: 60 },
+                  emotion: { interiority: 45, externality: 55, intensityMin: 2, intensityMax: 4 },
+                  ratios: { action: 35, dialogue: 18, description: 37, interiority: 10 },
+                  antiStyle: ["总结式抒情", "解释动机"],
+                  version: 2,
+                  status: "confirmed",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "style_sample_list":
+            case "style_preset_list":
+              return [];
+            case "style_contract_text":
+              return "[STYLE CONTRACT v2]\n视角：第三人称限知，过去时\n句法：平均 16 至 24 字，短句比例约 38%\n意象：雨、旧灯\n禁例：总结式抒情、解释动机";
+            case "generation_runs":
+              return [];
             case "review_queue":
               return {
                 candidates: [candidate, candidate2],
@@ -291,4 +371,13 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "伏笔", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "promises.png") });
+
+  await page.getByRole("button", { name: "正文", exact: true }).click();
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: path.join("test-results", "studio.png") });
+
+  await page.getByRole("button", { name: "设定", exact: true }).click();
+  await page.getByRole("button", { name: "文笔", exact: true }).click();
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: path.join("test-results", "style.png") });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Feather, GitBranch, Library } from "lucide-react";
+import { GitBranch, Library } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { CanonPage } from "@/features/canon/CanonPage";
@@ -9,6 +9,7 @@ import { PromisesPage } from "@/features/promises/PromisesPage";
 import { OverviewPage } from "@/features/project/OverviewPage";
 import { PlaceholderPage } from "@/features/placeholder/PlaceholderPage";
 import { SeedPage } from "@/features/seed/SeedPage";
+import { StudioPage } from "@/features/studio/StudioPage";
 import { ipc } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 
@@ -17,6 +18,7 @@ export default function App() {
   const setProject = useAppStore((s) => s.setProject);
   const setModel = useAppStore((s) => s.setModel);
   const setNav = useAppStore((s) => s.setNav);
+  const notify = useAppStore((s) => s.notify);
   const [bootError, setBootError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,6 +39,12 @@ export default function App() {
       cancelled = true;
     };
   }, [setModel, setProject]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => notify(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [toast, notify]);
 
   if (!ready) {
     return (
@@ -90,15 +98,7 @@ export default function App() {
           description="百科由已确认事实生成，每页带来源与内容哈希。事实变化后会标记过期并可全量重建。"
         />
       ) : null}
-      {nav === "studio" ? (
-        <PlaceholderPage
-          eyebrow="Studio"
-          title="正文工坊"
-          icon={<Feather size={20} />}
-          emptyTitle="先确认一个章节目标"
-          description="场景契约、正文编辑与证据检查器会在这里并列展开。生成草稿先进入候选区，不直接覆盖正文。"
-        />
-      ) : null}
+      {nav === "studio" ? <StudioPage /> : null}
       {nav === "audit" ? <AuditPage /> : null}
       {toast ? (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 rounded-full border border-line bg-paper-raised px-4 py-2 text-[11px] text-ink shadow-lg">

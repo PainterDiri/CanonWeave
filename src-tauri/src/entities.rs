@@ -199,6 +199,7 @@ pub fn get_character(conn: &Connection, project_id: &str, id: &str) -> AppResult
     }))
 }
 
+#[allow(dead_code)]
 pub fn ensure_character(
     conn: &Connection,
     project_id: &str,

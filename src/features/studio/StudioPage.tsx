@@ -1,0 +1,916 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BookOpen,
+  Check,
+  LoaderCircle,
+  Pencil,
+  Play,
+  Plus,
+  Square,
+  Wand2,
+} from "lucide-react";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  Input,
+  Modal,
+  SectionTitle,
+  Textarea,
+} from "@/components/ui";
+import {
+  ipc,
+  onGenerationDelta,
+  onGenerationError,
+  onGenerationFinished,
+  type Candidate,
+  type ChapterRecord,
+  type ContextPreview,
+  type GenerationRunRow,
+  type SceneRecord,
+  type StyleCheck,
+  type StyleProfile,
+} from "@/lib/ipc";
+import { useAppStore } from "@/stores/ui";
+
+type SceneForm = {
+  id: string | null;
+  goal: string;
+  conflict: string;
+  pov: string;
+  storyTime: string;
+  placeId: string;
+  styleProfileId: string;
+  target: string;
+  intensity: number;
+  entry: string;
+  exit: string;
+  turn: string;
+  channels: string;
+  motifs: string;
+  distance: string;
+};
+
+const emptyScene: SceneForm = {
+  id: null,
+  goal: "",
+  conflict: "",
+  pov: "",
+  storyTime: "",
+  placeId: "",
+  styleProfileId: "",
+  target: "",
+  intensity: 3,
+  entry: "",
+  exit: "",
+  turn: "",
+  channels: "视觉，触觉",
+  motifs: "",
+  distance: "中景",
+};
+
+export function StudioPage() {
+  const [chapters, setChapters] = useState<ChapterRecord[]>([]);
+  const [scenes, setScenes] = useState<SceneRecord[]>([]);
+  const [styles, setStyles] = useState<StyleProfile[]>([]);
+  const [chapterId, setChapterId] = useState<string | null>(null);
+  const [sceneId, setSceneId] = useState<string | null>(null);
+  const [chapterText, setChapterText] = useState("");
+  const [editorText, setEditorText] = useState("");
+  const [output, setOutput] = useState("");
+  const [streaming, setStreaming] = useState("");
+  const [runId, setRunId] = useState<string | null>(null);
+  const [lastCandidate, setLastCandidate] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Candidate[]>([]);
+  const [runs, setRuns] = useState<GenerationRunRow[]>([]);
+  const [sceneForm, setSceneForm] = useState<SceneForm | null>(null);
+  const [context, setContext] = useState<ContextPreview | null>(null);
+  const [styleReport, setStyleReport] = useState<StyleCheck | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const [styleOverride, setStyleOverride] = useState("");
+  const [centerTab, setCenterTab] = useState<"generate" | "chapter">("generate");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const streamRef = useRef("");
+  const refreshProject = useAppStore((s) => s.refreshProject);
+
+  const currentChapter = chapters.find((chapter) => chapter.id === chapterId) ?? null;
+  const currentScene = scenes.find((scene) => scene.id === sceneId) ?? null;
+
+  const loadDrafts = useCallback(async () => {
+    const list = await ipc.candidateList("pending", "draft");
+    setDrafts(list);
+  }, []);
+
+  const loadChapter = useCallback(async (id: string) => {
+    const [sceneList, text] = await Promise.all([ipc.scenes(id), ipc.chapterText(id)]);
+    setScenes(sceneList);
+    setSceneId((current) =>
+      sceneList.some((scene) => scene.id === current) ? current : (sceneList[0]?.id ?? null),
+    );
+    setChapterText(text);
+    setEditorText(text);
+    setOutput("");
+    setStyleReport(null);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [chapterList, styleList, draftList, runList] = await Promise.all([
+          ipc.chapters(),
+          ipc.styleProfiles(),
+          ipc.candidateList("pending", "draft"),
+          ipc.generationRuns(),
+        ]);
+        setChapters(chapterList);
+        setStyles(styleList);
+        setDrafts(draftList);
+        setRuns(runList);
+        if (chapterList[0]) {
+          setChapterId(chapterList[0].id);
+          await loadChapter(chapterList[0].id);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [loadChapter]);
+
+  useEffect(() => {
+    let disposeDelta = () => {};
+    let disposeFinished = () => {};
+    let disposeError = () => {};
+    void onGenerationDelta((event) => {
+      streamRef.current += event.delta;
+      setStreaming(streamRef.current);
+    }).then((fn) => (disposeDelta = fn));
+    void onGenerationFinished((event) => {
+      setRunId(null);
+      setStreaming("");
+      setOutput(streamRef.current);
+      setLastCandidate(event.candidateId);
+      streamRef.current = "";
+      void loadDrafts();
+      void ipc.generationRuns().then(setRuns);
+    }).then((fn) => (disposeFinished = fn));
+    void onGenerationError((event) => {
+      setError(event.error);
+      setRunId(null);
+      setOutput((prev) => prev || streamRef.current);
+      setStreaming("");
+      streamRef.current = "";
+    }).then((fn) => (disposeError = fn));
+    return () => {
+      disposeDelta();
+      disposeFinished();
+      disposeError();
+    };
+  }, [loadDrafts]);
+
+  const selectChapter = async (id: string) => {
+    setChapterId(id);
+    setBusy(true);
+    try {
+      await loadChapter(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generate = async () => {
+    if (!currentScene) {
+      setError("请先建立场景契约");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setOutput("");
+    setStreaming("");
+    streamRef.current = "";
+    setStyleReport(null);
+    try {
+      const result = await ipc.generationStart({
+        sceneId: currentScene.id,
+        mode: "quick",
+        styleProfileId: styleOverride || currentScene.styleProfileId,
+        extraInstruction: instruction.trim() || null,
+      });
+      setRunId(result.runId);
+      setCenterTab("generate");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (runId) await ipc.generationCancel(runId);
+  };
+
+  const previewContext = async () => {
+    if (!currentScene) return;
+    setBusy(true);
+    try {
+      setContext(
+        await ipc.contextPreview(
+          currentScene.id,
+          12000,
+          styleOverride || currentScene.styleProfileId,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkStyle = async () => {
+    const profileId = styleOverride || currentScene?.styleProfileId || styles[0]?.id;
+    if (!profileId || !output) {
+      setError("需要先有正文和文笔档案");
+      return;
+    }
+    try {
+      setStyleReport(await ipc.styleCheck(output, profileId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const acceptDraft = async (candidateId: string) => {
+    if (!chapterId) return;
+    setBusy(true);
+    try {
+      await ipc.draftAccept(candidateId, chapterId);
+      await loadChapter(chapterId);
+      await loadDrafts();
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveChapter = async () => {
+    if (!chapterId) return;
+    setBusy(true);
+    try {
+      await ipc.chapterTextSave(chapterId, editorText);
+      setChapterText(editorText);
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openNewScene = () =>
+    setSceneForm({
+      ...emptyScene,
+      styleProfileId: styles.find((style) => style.scope === "project")?.id ?? "",
+    });
+
+  const openEditScene = (scene: SceneRecord) =>
+    setSceneForm({
+      id: scene.id,
+      goal: scene.goal,
+      conflict: scene.conflict,
+      pov: scene.pov,
+      storyTime: scene.storyTime,
+      placeId: scene.placeId ?? "",
+      styleProfileId: scene.styleProfileId ?? "",
+      target: scene.emotionBeat.target,
+      intensity: scene.emotionBeat.intensity,
+      entry: scene.emotionBeat.entry,
+      exit: scene.emotionBeat.exit,
+      turn: scene.emotionBeat.turn,
+      channels: scene.sensoryPlan.channels.join("，"),
+      motifs: scene.sensoryPlan.motifs.join("，"),
+      distance: scene.sensoryPlan.distance,
+    });
+
+  const saveScene = async () => {
+    if (!sceneForm || !chapterId) return;
+    setBusy(true);
+    try {
+      const scene = await ipc.sceneSave({
+        id: sceneForm.id,
+        chapterId,
+        goal: sceneForm.goal,
+        conflict: sceneForm.conflict,
+        pov: sceneForm.pov,
+        storyTime: sceneForm.storyTime,
+        placeId: sceneForm.placeId || null,
+        styleProfileId: sceneForm.styleProfileId || null,
+        emotionBeat: {
+          target: sceneForm.target,
+          intensity: sceneForm.intensity,
+          entry: sceneForm.entry,
+          exit: sceneForm.exit,
+          turn: sceneForm.turn,
+        },
+        sensoryPlan: {
+          channels: split(sceneForm.channels),
+          motifs: split(sceneForm.motifs),
+          distance: sceneForm.distance,
+        },
+      });
+      setSceneForm(null);
+      await loadChapter(chapterId);
+      setSceneId(scene.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center text-[12px] text-muted">
+        <LoaderCircle size={15} className="mr-2 animate-spin" /> 正在打开正文工坊
+      </div>
+    );
+  }
+
+  if (!chapters.length) {
+    return (
+      <div className="fade-in mx-auto max-w-[1000px] px-8 py-7">
+        <SectionTitle eyebrow="Studio" title="正文工坊" />
+        <EmptyState
+          icon={<BookOpen size={20} />}
+          title="还没有可写的章节"
+          description="先在灵感页生成并确认章节骨架，前三章确认后就可以建立第一场场景契约。"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="fade-in mx-auto max-w-[1280px] px-6 py-6">
+      <SectionTitle
+        eyebrow="Studio"
+        title="正文工坊"
+        action={
+          <div className="flex items-center gap-2">
+            <Badge tone="teal">快速模式</Badge>
+            {currentChapter?.currentRevisionId ? <Badge tone="neutral">已有版本</Badge> : null}
+          </div>
+        }
+      />
+      {error ? (
+        <div className="mb-4 rounded-lg border border-coral/25 bg-coral-soft/60 px-4 py-2.5 text-[11.5px] leading-5 text-coral">
+          {error}
+        </div>
+      ) : null}
+      <div className="grid grid-cols-[260px_minmax(0,1fr)] gap-4">
+        <aside className="paper-card flex h-[680px] min-h-0 flex-col overflow-hidden">
+          <div className="border-b border-line px-3.5 py-2.5 text-[11px] font-semibold text-ink-soft">
+            章节与场景
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+            {chapters.map((chapter) => (
+              <div key={chapter.id} className="mb-1">
+                <button
+                  onClick={() => void selectChapter(chapter.id)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                    chapterId === chapter.id ? "bg-teal-soft/70" : "hover:bg-ink/[0.03]"
+                  }`}
+                >
+                  <span className="w-5 text-[9.5px] text-muted">{chapter.number}</span>
+                  <span className="flex-1 truncate text-[11.5px] font-medium text-ink">
+                    {chapter.title}
+                  </span>
+                  <span className="text-[9px] text-muted">{chapter.sceneCount} 场</span>
+                </button>
+                {chapterId === chapter.id ? (
+                  <div className="ml-4 mt-1 space-y-0.5 border-l border-line pl-2">
+                    {scenes.map((scene) => (
+                      <button
+                        key={scene.id}
+                        onClick={() => {
+                          setSceneId(scene.id);
+                          setCenterTab("generate");
+                        }}
+                        className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[10.5px] transition ${
+                          sceneId === scene.id
+                            ? "bg-paper text-teal"
+                            : "text-muted hover:bg-ink/[0.03] hover:text-ink"
+                        }`}
+                      >
+                        <span className="h-1 w-1 rounded-full bg-current opacity-50" />
+                        <span className="truncate">
+                          第 {scene.number} 场 · {scene.goal || "未命名"}
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={openNewScene}
+                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] text-teal/70 hover:bg-teal-soft/40"
+                    >
+                      <Plus size={10} /> 新建场景
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-4">
+          <section className="paper-card flex h-[680px] min-h-0 flex-col overflow-hidden">
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <div className="flex items-center gap-4">
+                <div className="flex rounded-full border border-line p-0.5">
+                  {[
+                    { key: "generate" as const, label: "生成" },
+                    { key: "chapter" as const, label: "正文" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setCenterTab(tab.key)}
+                      className={`rounded-full px-3 py-1 text-[10px] font-medium transition ${
+                        centerTab === tab.key
+                          ? "bg-teal text-paper-raised"
+                          : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                {currentScene ? (
+                  <span className="text-[10px] text-muted">
+                    第 {currentScene.number} 场 · {currentScene.status}
+                  </span>
+                ) : null}
+              </div>
+              {currentScene ? (
+                <Button size="sm" tone="ghost" onClick={() => openEditScene(currentScene)} icon={<Pencil size={11} />}>
+                  场景契约
+                </Button>
+              ) : null}
+            </div>
+
+            {centerTab === "generate" ? (
+              <>
+                <div className="border-b border-line px-5 py-3">
+                  {currentScene ? (
+                    <>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="display text-[17px] text-ink">{currentScene.goal}</div>
+                          <div className="mt-1 text-[11px] leading-5 text-muted">
+                            冲突：{currentScene.conflict}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 gap-1.5">
+                          <Badge tone="amber">
+                            {currentScene.emotionBeat.target || "情绪未设定"} · {currentScene.emotionBeat.intensity}/5
+                          </Badge>
+                          <Badge tone="neutral">{currentScene.pov || "POV 未设定"}</Badge>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center gap-3 text-[9.5px] text-muted">
+                        <span>感官：{currentScene.sensoryPlan.channels.join(" / ") || "未设定"}</span>
+                        <span>母题：{currentScene.sensoryPlan.motifs.join(" / ") || "未设定"}</span>
+                        <span>距离：{currentScene.sensoryPlan.distance || "未设定"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11.5px] text-muted">本章还没有场景契约</span>
+                      <Button size="sm" onClick={openNewScene} icon={<Plus size={11} />}>
+                        新建场景
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  {streaming || output ? (
+                    <div className="mx-auto max-w-[720px]">
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="text-[10px] font-medium tracking-wide text-muted">
+                          {streaming ? "正在生成…" : "生成结果（尚未写入正文）"}
+                        </span>
+                        <span className="text-[10px] text-muted">
+                          {(streaming || output).length} 字
+                        </span>
+                      </div>
+                      <div className="whitespace-pre-wrap font-display text-[14px] leading-8 text-ink">
+                        {streaming || output}
+                        {streaming ? (
+                          <span className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-teal align-middle" />
+                        ) : null}
+                      </div>
+                      {!streaming && output ? (
+                        <div className="mt-5 flex items-center gap-2">
+                          <Button size="sm" onClick={() => void checkStyle()}>
+                            文笔检查
+                          </Button>
+                          {lastCandidate ? (
+                            <Button
+                              size="sm"
+                              tone="primary"
+                              onClick={() => void acceptDraft(lastCandidate)}
+                              disabled={busy}
+                              icon={<Check size={12} />}
+                            >
+                              接受为正文
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center text-center">
+                      <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full border border-teal/20 bg-teal-soft/40 text-teal">
+                        <Wand2 size={18} />
+                      </div>
+                      <div className="display text-[18px] text-ink">按场景契约起草</div>
+                      <p className="mt-2 max-w-sm text-[11px] leading-6 text-muted">
+                        系统会编译九层上下文，注入文笔契约与人物声音。生成先进入候选区，接受后才写入正文版本。
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-line px-4 py-3">
+                  <div className="flex items-end gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        value={instruction}
+                        onChange={(e) => setInstruction(e.target.value)}
+                        placeholder="额外要求，例如：把雨声写成压迫感，不要解释父亲为什么离开"
+                        disabled={Boolean(runId)}
+                      />
+                    </div>
+                    <select
+                      value={styleOverride}
+                      onChange={(e) => setStyleOverride(e.target.value)}
+                      className="h-10 max-w-[150px] rounded-[10px] border border-line-strong bg-paper-raised px-2 text-[10.5px]"
+                    >
+                      <option value="">跟随场景文笔</option>
+                      {styles.map((style) => (
+                        <option key={style.id} value={style.id}>
+                          {style.name}
+                        </option>
+                      ))}
+                    </select>
+                    {runId ? (
+                      <Button size="md" onClick={() => void cancel()} icon={<Square size={12} />}>
+                        停止
+                      </Button>
+                    ) : (
+                      <Button
+                        size="md"
+                        tone="primary"
+                        onClick={() => void generate()}
+                        disabled={!currentScene || busy}
+                        icon={<Play size={13} />}
+                      >
+                        生成草稿
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                  <div className="mx-auto max-w-[720px]">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="text-[10px] font-medium tracking-wide text-muted">
+                        当前正文 · {chapterText.length} 字
+                      </span>
+                      <Button
+                        size="sm"
+                        tone="primary"
+                        onClick={() => void saveChapter()}
+                        disabled={busy || editorText === chapterText}
+                      >
+                        保存新版本
+                      </Button>
+                    </div>
+                    <Textarea
+                      value={editorText}
+                      onChange={(e) => setEditorText(e.target.value)}
+                      className="min-h-[480px] border-transparent bg-transparent px-0 font-display text-[14px] leading-8 focus:border-transparent"
+                      placeholder="在这里写作，或从生成结果接受草稿…"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
+
+          <aside className="flex h-[680px] min-h-0 flex-col gap-3">
+            <section className="paper-card p-3.5">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10.5px] font-semibold text-ink-soft">上下文预检</span>
+                <Button size="sm" tone="ghost" onClick={() => void previewContext()} disabled={!currentScene}>
+                  编译
+                </Button>
+              </div>
+              {context ? (
+                <div className="space-y-1">
+                  <div className="text-[9.5px] leading-4 text-muted">
+                    {context.totalChars} / {context.budget} 字 · {context.contextHash.slice(0, 10)}
+                  </div>
+                  {context.sections.map((section) => (
+                    <div
+                      key={section.layer}
+                      className="flex items-center justify-between text-[9.5px]"
+                    >
+                      <span className="text-muted">
+                        {section.layer} {section.title}
+                      </span>
+                      <span className="text-ink-soft">
+                        {section.chars}/{section.budget}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[9.5px] leading-4 text-muted">
+                  生成前可查看九层上下文与哈希。缺少证据时会明确标注。
+                </div>
+              )}
+            </section>
+
+            <section className="paper-card flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="border-b border-line px-3.5 py-2.5 text-[10.5px] font-semibold text-ink-soft">
+                草稿候选 {drafts.length}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {drafts.length === 0 ? (
+                  <div className="px-2 py-6 text-center text-[9.5px] leading-5 text-muted">
+                    生成或“继续写”的草稿会进入这里，接受后才写入正文。
+                  </div>
+                ) : (
+                  drafts.map((draft) => (
+                    <div key={draft.id} className="mb-2 rounded-lg border border-line bg-paper/60 p-2.5">
+                      <div className="text-[9px] text-muted">
+                        {draft.payload.source === "chat_continue" ? "对话续写" : "场景生成"} ·{" "}
+                        {draft.payload.wordCount ?? "—"} 字
+                      </div>
+                      <p className="mt-1 line-clamp-4 text-[10px] leading-4 text-ink-soft">
+                        {String(draft.payload.text ?? "").slice(0, 160)}
+                      </p>
+                      <div className="mt-1.5 flex justify-end">
+                        <Button
+                          size="sm"
+                          tone="ghost"
+                          onClick={() => void acceptDraft(draft.id)}
+                          disabled={!chapterId}
+                        >
+                          写入
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="paper-card max-h-[190px] overflow-y-auto p-3.5">
+              <div className="mb-2 flex items-center justify-between text-[10.5px] font-semibold text-ink-soft">
+                <span>文笔漂移</span>
+                <span className="text-[9px] text-muted">{styleReport ? `${styleReport.drifts.length} 项` : "未检查"}</span>
+              </div>
+              {styleReport ? (
+                styleReport.drifts.length ? (
+                  <div className="space-y-1.5">
+                    {styleReport.drifts.slice(0, 4).map((drift) => (
+                      <div key={drift.dimension} className="text-[9px] leading-4">
+                        <span className={drift.severity === "major" ? "text-coral" : "text-amber"}>
+                          {drift.dimension}
+                        </span>
+                        <span className="text-muted">
+                          {" "}
+                          {drift.current} · 目标 {drift.target}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[9.5px] leading-4 text-teal">暂未检测到明显漂移。</div>
+                )
+              ) : (
+                <div className="text-[9.5px] leading-4 text-muted">生成后运行检查，只提示不自动改写。</div>
+              )}
+            </section>
+
+            <section className="paper-card p-3.5">
+              <div className="mb-1.5 text-[10px] font-semibold text-ink-soft">最近运行</div>
+              {runs.slice(0, 3).map((run) => (
+                <div key={run.id} className="flex items-center justify-between py-0.5 text-[9px] text-muted">
+                  <span className="truncate">{run.model}</span>
+                  <span className={run.status === "done" ? "text-teal" : "text-amber"}>
+                    {run.status}
+                  </span>
+                </div>
+              ))}
+              {!runs.length ? <div className="text-[9px] text-muted">还没有生成运行。</div> : null}
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <SceneEditor
+        form={sceneForm}
+        styles={styles}
+        onChange={setSceneForm}
+        onClose={() => setSceneForm(null)}
+        onSave={saveScene}
+      />
+      <ContextModal context={context} onClose={() => setContext(null)} />
+    </div>
+  );
+}
+
+function SceneEditor({
+  form,
+  styles,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  form: SceneForm | null;
+  styles: StyleProfile[];
+  onChange: (form: SceneForm) => void;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+}) {
+  const set = <K extends keyof SceneForm>(key: K, value: SceneForm[K]) => {
+    if (form) onChange({ ...form, [key]: value });
+  };
+  return (
+    <Modal
+      open={Boolean(form)}
+      onOpenChange={(open) => !open && onClose()}
+      title={form?.id ? "编辑场景契约" : "新建场景契约"}
+      description="场景契约决定这一场改变什么。情绪节拍与感官计划会进入上下文和文笔检查。"
+      width="max-w-[720px]"
+      footer={
+        <>
+          <Button tone="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            tone="primary"
+            onClick={() => void onSave()}
+            disabled={!form?.goal.trim() || !form?.conflict.trim()}
+          >
+            保存场景
+          </Button>
+        </>
+      }
+    >
+      {form ? (
+        <div className="space-y-3">
+          <Field label="场景目标" hint="这一场要改变什么">
+            <Textarea rows={2} value={form.goal} onChange={(e) => set("goal", e.target.value)} />
+          </Field>
+          <Field label="冲突" hint="谁阻止，代价是什么">
+            <Textarea
+              rows={2}
+              value={form.conflict}
+              onChange={(e) => set("conflict", e.target.value)}
+            />
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="POV">
+              <Input value={form.pov} onChange={(e) => set("pov", e.target.value)} />
+            </Field>
+            <Field label="故事时间">
+              <Input value={form.storyTime} onChange={(e) => set("storyTime", e.target.value)} />
+            </Field>
+            <Field label="地点">
+              <Input value={form.placeId} onChange={(e) => set("placeId", e.target.value)} />
+            </Field>
+          </div>
+          <Field label="文笔档案">
+            <select
+              value={form.styleProfileId}
+              onChange={(e) => set("styleProfileId", e.target.value)}
+              className="h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-[12px]"
+            >
+              <option value="">跟随项目默认</option>
+              {styles.map((style) => (
+                <option key={style.id} value={style.id}>
+                  {style.name} · v{style.version}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="hairline" />
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="目标情绪">
+              <Input value={form.target} onChange={(e) => set("target", e.target.value)} />
+            </Field>
+            <Field label="强度 1–5">
+              <Input
+                type="number"
+                min={1}
+                max={5}
+                value={form.intensity}
+                onChange={(e) => set("intensity", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="镜头距离">
+              <Input value={form.distance} onChange={(e) => set("distance", e.target.value)} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="入场状态">
+              <Input value={form.entry} onChange={(e) => set("entry", e.target.value)} />
+            </Field>
+            <Field label="出场状态">
+              <Input value={form.exit} onChange={(e) => set("exit", e.target.value)} />
+            </Field>
+          </div>
+          <Field label="转折">
+            <Input value={form.turn} onChange={(e) => set("turn", e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="感官通道" hint="逗号分隔，2–3 个">
+              <Input value={form.channels} onChange={(e) => set("channels", e.target.value)} />
+            </Field>
+            <Field label="母题" hint="1–2 个">
+              <Input value={form.motifs} onChange={(e) => set("motifs", e.target.value)} />
+            </Field>
+          </div>
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function ContextModal({
+  context,
+  onClose,
+}: {
+  context: ContextPreview | null;
+  onClose: () => void;
+}) {
+  return (
+    <Modal
+      open={Boolean(context)}
+      onOpenChange={(open) => !open && onClose()}
+      title="上下文包"
+      description="九层上下文，按预算截断并记录哈希。原文证据优先于摘要。"
+      width="max-w-[900px]"
+      footer={
+        <Button tone="ghost" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      {context ? (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between rounded-lg border border-line bg-paper px-3 py-2 text-[10px]">
+            <span className="text-muted">
+              {context.totalChars} / {context.budget} 字
+            </span>
+            <span className="font-mono text-ink-soft">{context.contextHash.slice(0, 20)}</span>
+          </div>
+          {context.sections.map((section) => (
+            <div key={section.layer} className="rounded-lg border border-line">
+              <div className="flex items-center justify-between border-b border-line bg-paper/60 px-3 py-1.5">
+                <span className="text-[10px] font-semibold text-teal">
+                  {section.layer} {section.title}
+                </span>
+                <span className="text-[9px] text-muted">
+                  {section.chars}/{section.budget}
+                </span>
+              </div>
+              <pre className="max-h-[160px] overflow-y-auto px-3 py-2 font-mono text-[9.5px] leading-5 whitespace-pre-wrap text-ink-soft">
+                {section.content}
+              </pre>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function split(value: string) {
+  return value
+    .split(/[，,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}

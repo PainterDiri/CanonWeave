@@ -4,9 +4,16 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
-const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "init", include_str!("../../migrations/001_init.sql"))];
+const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "init", include_str!("../../migrations/001_init.sql")),
+    (
+        2,
+        "generation_link",
+        include_str!("../../migrations/002_generation_link.sql"),
+    ),
+];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
     if let Some(parent) = path.parent() {

@@ -497,6 +497,118 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
     })
 }
 
+/// 批量接受只处理 L1，生成单一 revision；L2/L3 永不进入该路径。
+pub fn batch_accept_l1(
+    conn: &mut Connection,
+    project_id: &str,
+    ids: &[String],
+    chapter_id: Option<&str>,
+) -> AppResult<(String, String, i32)> {
+    let pending = list(conn, project_id, Some("pending"), None)?;
+    let eligible: Vec<Candidate> = pending
+        .into_iter()
+        .filter(|candidate| candidate.risk_level == "L1" && ids.contains(&candidate.id))
+        .collect();
+    if eligible.is_empty() {
+        return Err(AppError::Message(
+            "没有可批量接受的 L1 候选；L2/L3 必须逐条处理".into(),
+        ));
+    }
+    let batch_id = uuid::Uuid::new_v4().to_string();
+    let ts = now();
+    conn.execute(
+        "INSERT INTO review_batch (id, project_id, chapter_id, policy_id, item_count,
+            accepted_count, rejected_count, created_at)
+         VALUES (?1,?2,?3,NULL,?4,0,0,?5)",
+        params![batch_id, project_id, chapter_id, eligible.len() as i32, ts],
+    )?;
+    let mut accepted = 0;
+    let mut created = Vec::new();
+    for candidate in &eligible {
+        match accept(conn, project_id, &candidate.id) {
+            Ok(result) => {
+                accepted += 1;
+                created.push(result.created_id);
+            }
+            Err(error) => {
+                conn.execute(
+                    "INSERT INTO audit_log (id, project_id, action, subject, batch_id, detail, created_at)
+                     VALUES (?1,?2,'batch_accept_failed',?3,?4,?5,?6)",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        project_id,
+                        candidate.id,
+                        batch_id,
+                        json!({"error": error.to_string()}).to_string(),
+                        now()
+                    ],
+                )
+                .ok();
+            }
+        }
+    }
+    let snapshot_id = uuid::Uuid::new_v4().to_string();
+    let revision_id = uuid::Uuid::new_v4().to_string();
+    let diff = json!({
+        "action": "batch_accept",
+        "batchId": batch_id,
+        "candidateIds": eligible.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+        "createdIds": created
+    });
+    conn.execute(
+        "INSERT INTO snapshot (id, project_id, chapter_id, content, metadata, created_at)
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            snapshot_id,
+            project_id,
+            chapter_id,
+            diff.to_string(),
+            json!({"kind": "review_batch"}).to_string(),
+            ts
+        ],
+    )?;
+    let parent: Option<String> = chapter_id
+        .and_then(|id| {
+            conn.query_row(
+                "SELECT current_revision_id FROM chapter WHERE project_id=?1 AND id=?2",
+                params![project_id, id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+        });
+    conn.execute(
+        "INSERT INTO revision (id, project_id, parent_id, chapter_id, diff, snapshot_id,
+            author_action, created_at) VALUES (?1,?2,?3,?4,?5,?6,'batch_accept',?7)",
+        params![
+            revision_id,
+            project_id,
+            parent,
+            chapter_id,
+            diff.to_string(),
+            snapshot_id,
+            ts
+        ],
+    )?;
+    conn.execute(
+        "UPDATE review_batch SET accepted_count=?2, revision_id=?3 WHERE id=?1",
+        params![batch_id, accepted, revision_id],
+    )?;
+    conn.execute(
+        "INSERT INTO audit_log (id, project_id, action, subject, batch_id, detail, created_at)
+         VALUES (?1,?2,'batch_accept',?3,?4,?5,?6)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            project_id,
+            revision_id,
+            batch_id,
+            json!({"accepted": accepted, "revisionId": revision_id}).to_string(),
+            ts
+        ],
+    )?;
+    Ok((batch_id, revision_id, accepted))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,5 +669,73 @@ mod tests {
     fn missing_source_escalates_to_l2() {
         assert_eq!(risk_for("entity", &json!({}), false), "L2");
         assert_eq!(risk_for("entity", &json!({}), true), "L1");
+    }
+
+    #[test]
+    fn batch_accept_creates_one_revision_and_skips_l2() {
+        let (_dir, mut loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        let a = insert(
+            &loaded.conn,
+            &pid,
+            "entity",
+            json!({"type":"place","canonicalName":"旧车站"}),
+            Some("ch01"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        let b = insert(
+            &loaded.conn,
+            &pid,
+            "rule",
+            json!({"text":"旧车站只在雨夜出现"}),
+            Some("ch02"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        let risky = insert(
+            &loaded.conn,
+            &pid,
+            "claim",
+            json!({"subject":"父亲","predicate":"死亡","object":"","truthLayer":"world"}),
+            Some("ch03"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        assert_eq!(risky.risk_level, "L2");
+        let (_, revision, accepted) = batch_accept_l1(
+            &mut loaded.conn,
+            &pid,
+            &[a.id.clone(), b.id.clone(), risky.id.clone()],
+            None,
+        )
+        .unwrap();
+        assert_eq!(accepted, 2);
+        let revisions: i64 = loaded
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM revision WHERE author_action='batch_accept'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revisions, 1);
+        let risky_status: String = loaded
+            .conn
+            .query_row("SELECT status FROM candidate WHERE id=?1", [&risky.id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(risky_status, "pending");
+        let batch_revision: String = loaded
+            .conn
+            .query_row(
+                "SELECT revision_id FROM review_batch ORDER BY created_at DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(batch_revision, revision);
     }
 }

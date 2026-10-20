@@ -2,7 +2,9 @@ use tauri::State;
 
 use crate::{
     candidates,
-    domain::{Candidate, CandidateAcceptResult, ReviewQueue},
+    domain::{
+        BatchPreview, BatchResult, Candidate, CandidateAcceptResult, ReviewQueue,
+    },
     error::IpcResult,
     state::AppState,
 };
@@ -64,4 +66,71 @@ pub fn candidate_update_payload(
             candidates::update_payload(&loaded.conn, &loaded.summary.id, &id, payload)
         })
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn review_batch_preview(
+    state: State<'_, AppState>,
+    ids: Option<Vec<String>>,
+) -> IpcResult<BatchPreview> {
+    state
+        .with_project(|loaded| {
+            let pending = candidates::list(&loaded.conn, &loaded.summary.id, Some("pending"), None)?;
+            let selected: Vec<_> = pending
+                .into_iter()
+                .filter(|candidate| {
+                    ids.as_ref()
+                        .map(|ids| ids.contains(&candidate.id))
+                        .unwrap_or(true)
+                })
+                .collect();
+            let eligible: Vec<String> = selected
+                .iter()
+                .filter(|candidate| candidate.risk_level == "L1")
+                .map(|candidate| candidate.id.clone())
+                .collect();
+            let l1 = selected.iter().filter(|c| c.risk_level == "L1").count() as i32;
+            let l2 = selected.iter().filter(|c| c.risk_level == "L2").count() as i32;
+            let l3 = selected.iter().filter(|c| c.risk_level == "L3").count() as i32;
+            let blocked = selected
+                .iter()
+                .filter(|candidate| candidate.risk_level != "L1")
+                .map(|candidate| candidate.id.clone())
+                .collect();
+            Ok(BatchPreview {
+                count: eligible.len() as i32,
+                ids: eligible,
+                l1,
+                l2,
+                l3,
+                blocked,
+            })
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// 批量接受只处理 L1。创建单一 revision 记录批次；接受动作逐条仍保持证据链。
+#[tauri::command]
+#[specta::specta]
+pub fn review_batch_apply(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    chapter_id: Option<String>,
+) -> IpcResult<BatchResult> {
+    let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏".to_string())?;
+    let loaded = guard.as_mut().ok_or("尚未打开项目")?;
+    let (batch_id, revision_id, accepted) = candidates::batch_accept_l1(
+        &mut loaded.conn,
+        &loaded.summary.id,
+        &ids,
+        chapter_id.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(BatchResult {
+        batch_id,
+        revision_id,
+        accepted,
+        rejected: 0,
+    })
 }

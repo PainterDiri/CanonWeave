@@ -35,6 +35,7 @@ impl ChatTurn {
         }
     }
 
+    #[allow(dead_code)]
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: "assistant".into(),

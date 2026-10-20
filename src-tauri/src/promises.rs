@@ -138,6 +138,7 @@ pub fn transition(
     get(conn, project_id, &input.id)
 }
 
+#[allow(dead_code)]
 pub fn due(conn: &Connection, project_id: &str, current_chapter: i32) -> AppResult<Vec<PromiseRecord>> {
     let all = list(conn, project_id)?;
     Ok(all
@@ -159,6 +160,7 @@ pub fn due(conn: &Connection, project_id: &str, current_chapter: i32) -> AppResu
         .collect())
 }
 
+#[allow(dead_code)]
 pub fn evidence_list(conn: &Connection, project_id: &str) -> AppResult<Value> {
     let mut stmt = conn.prepare("SELECT id, title, state, target_window FROM promise WHERE project_id=?1")?;
     let rows = stmt

@@ -8,9 +8,9 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { Badge, Button, SectionTitle } from "@/components/ui";
+import { Badge, Button, Modal, SectionTitle } from "@/components/ui";
 import { summaryOf } from "@/features/seed/ChatWorkspace";
-import { ipc, type ReviewQueue } from "@/lib/ipc";
+import { ipc, type BatchPreview, type ReviewQueue } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 
 const kindOptions = [
@@ -31,6 +31,7 @@ export function AuditPage() {
   const [kind, setKind] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [batch, setBatch] = useState<BatchPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refreshProject = useAppStore((s) => s.refreshProject);
 
@@ -92,6 +93,33 @@ export function AuditPage() {
     [load, refreshProject],
   );
 
+  const previewBatch = async () => {
+    setBusy(true);
+    try {
+      setBatch(await ipc.reviewBatchPreview(null));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyBatch = async () => {
+    if (!batch) return;
+    setBusy(true);
+    try {
+      const result = await ipc.reviewBatchApply(batch.ids, null);
+      setBatch(null);
+      await load();
+      await refreshProject();
+      setError(`已批量接受 ${result.accepted} 条 L1，生成 revision ${result.revisionId.slice(0, 8)}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -129,6 +157,13 @@ export function AuditPage() {
         title="一致性审计"
         action={
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => void previewBatch()}
+              disabled={busy || !queue?.counts.l1}
+            >
+              接受本批 L1
+            </Button>
             <Badge tone="teal">平衡策略</Badge>
             <Badge tone="neutral">L0 自动通过：关闭</Badge>
           </div>
@@ -294,6 +329,48 @@ export function AuditPage() {
           )}
         </div>
       )}
+
+      <Modal
+        open={Boolean(batch)}
+        onOpenChange={(open) => !open && setBatch(null)}
+        title="批量接受低风险候选"
+        description="只会处理 L1。L2/L3 仍留在队列中逐条确认；接受后生成单一 revision。"
+        footer={
+          <>
+            <Button tone="ghost" onClick={() => setBatch(null)}>
+              取消
+            </Button>
+            <Button
+              tone="primary"
+              onClick={() => void applyBatch()}
+              disabled={busy || !batch?.count}
+            >
+              接受 {batch?.count ?? 0} 条
+            </Button>
+          </>
+        }
+      >
+        {batch ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                ["可接受 L1", batch.l1],
+                ["需逐条 L2", batch.l2],
+                ["必须处理 L3", batch.l3],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-lg border border-line bg-paper px-3 py-2.5">
+                  <div className="text-[9.5px] text-muted">{label}</div>
+                  <div className="mt-1 text-[20px] text-ink">{value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-lg border border-line bg-paper/60 px-3 py-2.5 text-[10.5px] leading-5 text-muted">
+              本批共 {batch.count} 条 L1 会写入权威库；{batch.blocked.length} 条高影响候选不会自动通过。
+              接受后记录批次、策略与时间。
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

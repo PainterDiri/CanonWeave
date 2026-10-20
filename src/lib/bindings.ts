@@ -83,6 +83,36 @@ export const commands = {
 	promiseList: () => typedError<PromiseRecord[], string>(__TAURI_INVOKE("promise_list")),
 	promiseSave: (input: PromiseInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_save", { input })),
 	promiseTransition: (input: PromiseStateInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_transition", { input })),
+	stylePresetList: () => __TAURI_INVOKE<StylePreset[]>("style_preset_list"),
+	styleProfileList: () => typedError<StyleProfile[], string>(__TAURI_INVOKE("style_profile_list")),
+	styleProfileGet: (id: string) => typedError<StyleProfile, string>(__TAURI_INVOKE("style_profile_get", { id })),
+	styleProfileSave: (input: StyleProfileInput) => typedError<StyleProfile, string>(__TAURI_INVOKE("style_profile_save", { input })),
+	styleProfileApplyPreset: (presetId: string, name: string | null) => typedError<StyleProfile, string>(__TAURI_INVOKE("style_profile_apply_preset", { presetId, name })),
+	styleSampleAdd: (input: StyleSampleInput) => typedError<StyleSample, string>(__TAURI_INVOKE("style_sample_add", { input })),
+	styleSampleList: (profileId: string | null) => typedError<StyleSample[], string>(__TAURI_INVOKE("style_sample_list", { profileId })),
+	styleAnalyze: (text: string) => __TAURI_INVOKE<StyleMetrics>("style_analyze", { text }),
+	styleContractText: (profileId: string) => typedError<string, string>(__TAURI_INVOKE("style_contract_text", { profileId })),
+	styleCheck: (text: string, profileId: string) => typedError<StyleCheck, string>(__TAURI_INVOKE("style_check", { text, profileId })),
+	styleCompare: (leftText: string, rightText: string) => __TAURI_INVOKE<StyleCompare>("style_compare", { leftText, rightText }),
+	styleCalibrate: (profileId: string) => typedError<StyleProfile, string>(__TAURI_INVOKE("style_calibrate", { profileId })),
+	chapterList: () => typedError<ChapterRecord[], string>(__TAURI_INVOKE("chapter_list")),
+	sceneList: (chapterId: string | null) => typedError<SceneRecord[], string>(__TAURI_INVOKE("scene_list", { chapterId })),
+	sceneSave: (input: SceneInput) => typedError<SceneRecord, string>(__TAURI_INVOKE("scene_save", { input })),
+	sceneContractText: (sceneId: string) => typedError<string, string>(__TAURI_INVOKE("scene_contract_text", { sceneId })),
+	contextPreview: (sceneId: string, budget: number | null, styleProfileId: string | null) => typedError<ContextPreview, string>(__TAURI_INVOKE("context_preview", { sceneId, budget, styleProfileId })),
+	chapterTextGet: (chapterId: string) => typedError<string, string>(__TAURI_INVOKE("chapter_text_get", { chapterId })),
+	draftAccept: (candidateId: string, chapterId: string) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("draft_accept", { candidateId, chapterId })),
+	generationStart: (input: GenerationInput) => typedError<GenerationStartResult, string>(__TAURI_INVOKE("generation_start", { input })),
+	generationCancel: (runId: string) => typedError<null, string>(__TAURI_INVOKE("generation_cancel", { runId })),
+	generationRuns: () => typedError<GenerationRunRow[], string>(__TAURI_INVOKE("generation_runs")),
+	plotBeats: (input: PlotBeatsInput) => typedError<BeatOption[], string>(__TAURI_INVOKE("plot_beats", { input })),
+	sceneFromBeat: (chapterId: string, beat: BeatOption) => typedError<SceneRecord, string>(__TAURI_INVOKE("scene_from_beat", { chapterId, beat })),
+	chatContinue: (sessionId: string) => typedError<Candidate, string>(__TAURI_INVOKE("chat_continue", { sessionId })),
+	chatToScene: (sessionId: string, chapterId: string) => typedError<SceneRecord, string>(__TAURI_INVOKE("chat_to_scene", { sessionId, chapterId })),
+	reviewBatchPreview: (ids: string[] | null) => typedError<BatchPreview, string>(__TAURI_INVOKE("review_batch_preview", { ids })),
+	/**  批量接受只处理 L1。创建单一 revision 记录批次；接受动作逐条仍保持证据链。 */
+	reviewBatchApply: (ids: string[], chapterId: string | null) => typedError<BatchResult, string>(__TAURI_INVOKE("review_batch_apply", { ids, chapterId })),
+	chapterTextSave: (chapterId: string, text: string) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("chapter_text_save", { chapterId, text })),
 };
 
 /* Types */
@@ -90,6 +120,31 @@ export type AppInfo = {
 	name: string,
 	version: string,
 	schemaVersion: number,
+};
+
+export type BatchPreview = {
+	ids: string[],
+	count: number,
+	l1: number,
+	l2: number,
+	l3: number,
+	blocked: string[],
+};
+
+export type BatchResult = {
+	batchId: string,
+	revisionId: string,
+	accepted: number,
+	rejected: number,
+};
+
+export type BeatOption = {
+	title: string,
+	beat: string,
+	turn: string,
+	cost: string,
+	sceneGoal: string,
+	sceneConflict: string,
 };
 
 export type Candidate = {
@@ -124,6 +179,18 @@ export type CandidateCounts = {
 	l2: number,
 	l3: number,
 	total: number,
+};
+
+export type ChapterRecord = {
+	id: string,
+	number: number,
+	title: string,
+	status: string,
+	currentRevisionId: string | null,
+	styleProfileId: string | null,
+	styleEpoch: number,
+	sceneCount: number,
+	updatedAt: string,
 };
 
 export type CharacterDetail = {
@@ -205,11 +272,40 @@ export type ChatSessionCreateInput = {
 	parentSessionId: string | null,
 };
 
+export type ContextPreview = {
+	sections: ContextSection[],
+	totalChars: number,
+	budget: number,
+	contextHash: string,
+};
+
+export type ContextSection = {
+	layer: string,
+	title: string,
+	content: string,
+	chars: number,
+	budget: number,
+};
+
 export type CreateProjectInput = {
 	name: string,
 	rootPath: string,
 	mode: string,
 	writingLanguage: string | null,
+};
+
+export type DraftAcceptResult = {
+	chapterId: string,
+	revisionId: string,
+	snapshotId: string,
+};
+
+export type EmotionBeat = {
+	target: string,
+	intensity: number,
+	entry: string,
+	exit: string,
+	turn: string,
 };
 
 export type Entity = {
@@ -223,6 +319,31 @@ export type Entity = {
 
 export type ExtractionResult = {
 	candidatesCreated: number,
+};
+
+export type GenerationInput = {
+	sceneId: string,
+	mode: string,
+	styleProfileId: string | null,
+	extraInstruction: string | null,
+};
+
+export type GenerationRunRow = {
+	id: string,
+	sceneId: string | null,
+	mode: string,
+	status: string,
+	model: string,
+	contextHash: string,
+	error: string,
+	createdAt: string,
+	candidateId: string | null,
+};
+
+export type GenerationStartResult = {
+	runId: string,
+	contextHash: string,
+	budget: number,
 };
 
 export type ImportResult = {
@@ -284,6 +405,11 @@ export type OutlineUpdateInput = {
 	conflict: string,
 	turn: string,
 	payoff: string,
+};
+
+export type PlotBeatsInput = {
+	sessionId: string,
+	instruction: string,
 };
 
 export type Premise = {
@@ -398,12 +524,49 @@ export type ReviewQueue = {
 	counts: CandidateCounts,
 };
 
+export type SceneInput = {
+	id: string | null,
+	chapterId: string,
+	goal: string,
+	conflict: string,
+	pov: string,
+	storyTime: string,
+	placeId: string | null,
+	styleProfileId: string | null,
+	emotionBeat: EmotionBeat,
+	sensoryPlan: SensoryPlan,
+};
+
+export type SceneRecord = {
+	id: string,
+	chapterId: string,
+	number: number,
+	goal: string,
+	conflict: string,
+	pov: string,
+	storyTime: string,
+	branchId: string | null,
+	placeId: string | null,
+	styleProfileId: string | null,
+	emotionBeat: EmotionBeat,
+	sensoryPlan: SensoryPlan,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
 export type SeedGenerateInput = {
 	logline: string,
 };
 
 export type SeedGenerateResult = {
 	directions: Premise[],
+};
+
+export type SensoryPlan = {
+	channels: string[],
+	motifs: string[],
+	distance: string,
 };
 
 export type SourceDocument = {
@@ -414,6 +577,163 @@ export type SourceDocument = {
 	title: string,
 	wordCount: number,
 	importedAt: string,
+};
+
+export type StyleCheck = {
+	metrics: StyleMetrics,
+	drifts: StyleDrift[],
+	styleDrift: boolean,
+};
+
+export type StyleCompare = {
+	left: StyleMetrics,
+	right: StyleMetrics,
+	deltas: StyleDrift[],
+};
+
+export type StyleDrift = {
+	dimension: string,
+	current: string,
+	target: string,
+	delta: string,
+	severity: string,
+	excerpt: string,
+	suggestion: string,
+};
+
+export type StyleEmotion = {
+	interiority: number,
+	externality: number,
+	intensityMin: number,
+	intensityMax: number,
+};
+
+export type StyleImagery = {
+	sensoryChannels: string[],
+	motifs: string[],
+	sensoryPer1000: number,
+};
+
+export type StyleLexicon = {
+	concreteRatio: number,
+	register: string,
+	adverbDensityMax: number,
+	bannedWords: string[],
+};
+
+export type StyleMetrics = {
+	chars: number,
+	sentences: number,
+	paragraphs: number,
+	avgSentenceLen: number,
+	p90SentenceLen: number,
+	sentenceVariance: number,
+	avgParagraphLen: number,
+	dialogueRatio: number,
+	descriptionRatio: number,
+	sensoryPer1000: number,
+	adverbPer1000: number,
+	metaphorPer1000: number,
+	clicheHits: string[],
+	repeatedOpenings: string[],
+	tellWithoutShow: TellIssue[],
+};
+
+export type StylePreset = {
+	id: string,
+	name: string,
+	description: string,
+	syntax: StyleSyntax,
+	lexicon: StyleLexicon,
+	imagery: StyleImagery,
+	rhetoric: StyleRhetoric,
+	emotion: StyleEmotion,
+	ratios: StyleRatios,
+	antiStyle: string[],
+};
+
+export type StyleProfile = {
+	id: string,
+	scope: string,
+	scopeId: string | null,
+	name: string,
+	pov: string,
+	person: string,
+	tense: string,
+	syntax: StyleSyntax,
+	lexicon: StyleLexicon,
+	imagery: StyleImagery,
+	rhetoric: StyleRhetoric,
+	emotion: StyleEmotion,
+	ratios: StyleRatios,
+	antiStyle: string[],
+	version: number,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type StyleProfileInput = {
+	id: string | null,
+	scope: string,
+	scopeId: string | null,
+	name: string,
+	pov: string,
+	person: string,
+	tense: string,
+	syntax: StyleSyntax,
+	lexicon: StyleLexicon,
+	imagery: StyleImagery,
+	rhetoric: StyleRhetoric,
+	emotion: StyleEmotion,
+	ratios: StyleRatios,
+	antiStyle: string[],
+};
+
+export type StyleRatios = {
+	action: number,
+	dialogue: number,
+	description: number,
+	interiority: number,
+};
+
+export type StyleRhetoric = {
+	metaphorPer1000: number,
+	irony: number,
+	minimalism: number,
+};
+
+export type StyleSample = {
+	id: string,
+	profileId: string | null,
+	text: string,
+	sourceSpan: string,
+	sourceType: string,
+	approved: boolean,
+	tags: string[],
+	createdAt: string,
+};
+
+export type StyleSampleInput = {
+	profileId: string | null,
+	text: string,
+	sourceSpan: string,
+	sourceType: string,
+	tags: string[],
+};
+
+export type StyleSyntax = {
+	avgSentenceMin: number,
+	avgSentenceMax: number,
+	shortRatio: number,
+	paragraphSentencesMin: number,
+	paragraphSentencesMax: number,
+};
+
+export type TellIssue = {
+	excerpt: string,
+	emotion: string,
+	reason: string,
 };
 
 /* Tauri Specta runtime */

@@ -10,6 +10,10 @@ import {
   type PromiseInput,
   type PromiseStateInput,
   type ProjectSnapshot,
+  type SceneInput,
+  type BeatOption,
+  type StyleProfileInput,
+  type StyleSampleInput,
 } from "./bindings";
 
 export type {
@@ -31,6 +35,20 @@ export type {
   ProjectSnapshot,
   ReviewQueue,
   SourceDocument,
+  StyleProfile,
+  StylePreset,
+  StyleSample,
+  StyleMetrics,
+  StyleCheck,
+  StyleCompare,
+  ChapterRecord,
+  SceneRecord,
+  SceneInput,
+  ContextPreview,
+  GenerationRunRow,
+  BeatOption,
+  BatchPreview,
+  BatchResult,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -189,6 +207,66 @@ export const ipc = {
     guarded(async () => unwrap(await commands.promiseSave(input))),
   promiseTransition: (input: PromiseStateInput) =>
     guarded(async () => unwrap(await commands.promiseTransition(input))),
+
+  stylePresets: () => guarded(async () => commands.stylePresetList()),
+  styleProfiles: () => guarded(async () => unwrap(await commands.styleProfileList())),
+  styleProfileGet: (id: string) =>
+    guarded(async () => unwrap(await commands.styleProfileGet(id))),
+  styleProfileSave: (input: StyleProfileInput) =>
+    guarded(async () => unwrap(await commands.styleProfileSave(input))),
+  styleApplyPreset: (presetId: string, name: string | null = null) =>
+    guarded(async () => unwrap(await commands.styleProfileApplyPreset(presetId, name))),
+  styleSamples: (profileId: string | null) =>
+    guarded(async () => unwrap(await commands.styleSampleList(profileId))),
+  styleSampleAdd: (input: StyleSampleInput) =>
+    guarded(async () => unwrap(await commands.styleSampleAdd(input))),
+  styleAnalyze: (text: string) =>
+    guarded(async () => commands.styleAnalyze(text)),
+  styleContract: (profileId: string) =>
+    guarded(async () => unwrap(await commands.styleContractText(profileId))),
+  styleCheck: (text: string, profileId: string) =>
+    guarded(async () => unwrap(await commands.styleCheck(text, profileId))),
+  styleCompare: (left: string, right: string) =>
+    guarded(async () => commands.styleCompare(left, right)),
+  styleCalibrate: (profileId: string) =>
+    guarded(async () => unwrap(await commands.styleCalibrate(profileId))),
+
+  chapters: () => guarded(async () => unwrap(await commands.chapterList())),
+  scenes: (chapterId: string | null) =>
+    guarded(async () => unwrap(await commands.sceneList(chapterId))),
+  sceneSave: (input: SceneInput) =>
+    guarded(async () => unwrap(await commands.sceneSave(input))),
+  sceneContract: (sceneId: string) =>
+    guarded(async () => unwrap(await commands.sceneContractText(sceneId))),
+  contextPreview: (sceneId: string, budget: number | null = null, styleProfileId: string | null = null) =>
+    guarded(async () => unwrap(await commands.contextPreview(sceneId, budget, styleProfileId))),
+  chapterText: (chapterId: string) =>
+    guarded(async () => unwrap(await commands.chapterTextGet(chapterId))),
+  chapterTextSave: (chapterId: string, text: string) =>
+    guarded(async () => unwrap(await commands.chapterTextSave(chapterId, text))),
+  draftAccept: (candidateId: string, chapterId: string) =>
+    guarded(async () => unwrap(await commands.draftAccept(candidateId, chapterId))),
+  generationStart: (input: {
+    sceneId: string;
+    mode: string;
+    styleProfileId: string | null;
+    extraInstruction: string | null;
+  }) => guarded(async () => unwrap(await commands.generationStart(input))),
+  generationCancel: (runId: string) =>
+    guarded(async () => unwrap(await commands.generationCancel(runId))),
+  generationRuns: () => guarded(async () => unwrap(await commands.generationRuns())),
+  plotBeats: (sessionId: string, instruction: string) =>
+    guarded(async () => unwrap(await commands.plotBeats({ sessionId, instruction }))),
+  sceneFromBeat: (chapterId: string, beat: BeatOption) =>
+    guarded(async () => unwrap(await commands.sceneFromBeat(chapterId, beat))),
+  chatContinue: (sessionId: string) =>
+    guarded(async () => unwrap(await commands.chatContinue(sessionId))),
+  chatToScene: (sessionId: string, chapterId: string) =>
+    guarded(async () => unwrap(await commands.chatToScene(sessionId, chapterId))),
+  reviewBatchPreview: (ids: string[] | null = null) =>
+    guarded(async () => unwrap(await commands.reviewBatchPreview(ids))),
+  reviewBatchApply: (ids: string[], chapterId: string | null = null) =>
+    guarded(async () => unwrap(await commands.reviewBatchApply(ids, chapterId))),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };
@@ -198,6 +276,37 @@ export async function onChatDelta(
 ): Promise<() => void> {
   if (!isTauri()) return () => {};
   return listen<ChatDeltaEvent>("chat://delta", (event) => handler(event.payload));
+}
+
+export type GenerationDeltaEvent = { runId: string; delta: string };
+export type GenerationFinishedEvent = {
+  runId: string;
+  candidateId: string | null;
+  status: string;
+};
+export type GenerationErrorEvent = { runId: string; error: string };
+
+export async function onGenerationDelta(
+  handler: (event: GenerationDeltaEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<GenerationDeltaEvent>("generation://delta", (event) => handler(event.payload));
+}
+
+export async function onGenerationFinished(
+  handler: (event: GenerationFinishedEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<GenerationFinishedEvent>("generation://finished", (event) =>
+    handler(event.payload),
+  );
+}
+
+export async function onGenerationError(
+  handler: (event: GenerationErrorEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<GenerationErrorEvent>("generation://error", (event) => handler(event.payload));
 }
 
 export { commands };

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, SectionTitle } from "@/components/ui";
 import { ipc, isTauri, type ModelConfig, type SourceDocument } from "@/lib/ipc";
+import { StylePage } from "@/features/style/StylePage";
 import { useAppStore } from "@/stores/ui";
 
 type Tab = "model" | "import" | "style" | "rules";
@@ -49,14 +50,7 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
       </div>
       {tab === "model" ? <ModelPanel model={model} /> : null}
       {tab === "import" ? <ImportPanel /> : null}
-      {tab === "style" ? (
-        <EmptyState
-          icon={<Paintbrush size={20} />}
-          title="文笔档案将在下一阶段接入"
-          description="文笔档案记录视角距离、句法节奏、词汇、意象、修辞、情绪表达与禁例，并能导出为结构化文笔契约。"
-          action={<Badge tone="amber">M2</Badge>}
-        />
-      ) : null}
+      {tab === "style" ? <StylePage /> : null}
       {tab === "rules" ? (
         <EmptyState
           icon={<ShieldAlert size={20} />}

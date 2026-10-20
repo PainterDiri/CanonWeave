@@ -1,19 +1,25 @@
 pub mod candidates;
 pub mod chat;
 pub mod entities;
+pub mod generation;
 pub mod import;
 pub mod model;
 pub mod outline;
 pub mod project;
 pub mod promises;
+pub mod scenes;
 pub mod seed;
+pub mod style;
 
 pub use candidates::*;
 pub use chat::*;
 pub use entities::*;
+pub use generation::*;
 pub use import::*;
 pub use model::*;
 pub use outline::*;
 pub use project::*;
 pub use promises::*;
+pub use scenes::*;
 pub use seed::*;
+pub use style::*;
