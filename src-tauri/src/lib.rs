@@ -7,6 +7,8 @@ mod domain;
 mod entities;
 mod error;
 mod fact_delta;
+mod branches;
+mod graphrag;
 mod import;
 mod llm;
 mod model;
@@ -68,7 +70,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
         review_batch_apply, chapter_text_save, review_policy_get, review_policy_save,
         review_policy_apply, review_batch_undo, review_sample_list, rule_list, audit_run,
         issue_list, issue_action, draft_accept_variant
-        , revision_list, revision_compare, revision_rollback, preference_save
+        , revision_list, revision_compare, revision_rollback, preference_save, branch_list,
+        branch_create, branch_switch, timeline_data, graph_data, community_build,
+        community_list, impact_analysis, insight_query
     ])
 }
 

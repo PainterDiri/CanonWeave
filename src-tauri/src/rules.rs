@@ -131,7 +131,8 @@ fn claims(conn: &Connection, project_id: &str) -> AppResult<Vec<ClaimFact>> {
     let mut stmt = conn.prepare(
         "SELECT id, subject, predicate, object, COALESCE(valid_from,''), source_span,
             truth_layer, perspective_id
-         FROM claim WHERE project_id=?1 AND status='confirmed'",
+         FROM claim WHERE project_id=?1 AND status='confirmed'
+           AND (branch_id IS NULL OR branch_id=(SELECT current_branch_id FROM project WHERE id=?1))",
     )?;
     let rows = stmt
         .query_map([project_id], |row| {
@@ -154,7 +155,9 @@ fn claims(conn: &Connection, project_id: &str) -> AppResult<Vec<ClaimFact>> {
 fn events(conn: &Connection, project_id: &str) -> AppResult<Vec<EventFact>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, participants, place_id, story_time, cause, outcome, source_span
-         FROM event WHERE project_id=?1 AND status='confirmed' ORDER BY story_time",
+         FROM event WHERE project_id=?1 AND status='confirmed'
+           AND (branch_id IS NULL OR branch_id=(SELECT current_branch_id FROM project WHERE id=?1))
+         ORDER BY story_time",
     )?;
     let rows = stmt
         .query_map([project_id], |row| {

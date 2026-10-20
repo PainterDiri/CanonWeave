@@ -127,6 +127,15 @@ export const commands = {
 	revisionCompare: (fromId: string, toId: string) => typedError<RevisionCompare, string>(__TAURI_INVOKE("revision_compare", { fromId, toId })),
 	revisionRollback: (revisionId: string) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("revision_rollback", { revisionId })),
 	preferenceSave: (input: PreferenceInput) => typedError<null, string>(__TAURI_INVOKE("preference_save", { input })),
+	branchList: () => typedError<BranchRecord[], string>(__TAURI_INVOKE("branch_list")),
+	branchCreate: (name: string, fromBranchId: string | null) => typedError<BranchRecord, string>(__TAURI_INVOKE("branch_create", { name, fromBranchId })),
+	branchSwitch: (id: string) => typedError<BranchRecord[], string>(__TAURI_INVOKE("branch_switch", { id })),
+	timelineData: (branchId: string | null) => typedError<TimelineItem[], string>(__TAURI_INVOKE("timeline_data", { branchId })),
+	graphData: () => typedError<GraphData, string>(__TAURI_INVOKE("graph_data")),
+	communityBuild: () => typedError<CommunityReport[], string>(__TAURI_INVOKE("community_build")),
+	communityList: () => typedError<CommunityReport[], string>(__TAURI_INVOKE("community_list")),
+	impactAnalysis: (entityId: string) => typedError<ImpactSet, string>(__TAURI_INVOKE("impact_analysis", { entityId })),
+	insightQuery: (question: string) => typedError<InsightResult, string>(__TAURI_INVOKE("insight_query", { question })),
 };
 
 /* Types */
@@ -189,6 +198,15 @@ export type BeatOption = {
 	cost: string,
 	sceneGoal: string,
 	sceneConflict: string,
+};
+
+export type BranchRecord = {
+	id: string,
+	name: string,
+	parentBranchId: string | null,
+	status: string,
+	createdAt: string,
+	isCurrent: boolean,
 };
 
 export type Candidate = {
@@ -316,6 +334,18 @@ export type ChatSessionCreateInput = {
 	parentSessionId: string | null,
 };
 
+export type CommunityReport = {
+	id: string,
+	level: number,
+	title: string,
+	memberIds: string[],
+	sourceIds: string[],
+	content: string,
+	summaryHash: string,
+	generatedAt: string,
+	staleAt: string | null,
+};
+
 export type ConflictCertificate = {
 	ruleId: string,
 	severity: string,
@@ -400,9 +430,49 @@ export type GenerationStartResult = {
 	budget: number,
 };
 
+export type GraphData = {
+	nodes: GraphNode[],
+	edges: GraphEdge[],
+};
+
+export type GraphEdge = {
+	id: string,
+	from: string,
+	to: string,
+	label: string,
+};
+
+export type GraphNode = {
+	id: string,
+	label: string,
+	kind: string,
+	community: number | null,
+};
+
+export type ImpactItem = {
+	kind: string,
+	id: string,
+	label: string,
+	reason: string,
+	source: string,
+};
+
+export type ImpactSet = {
+	targetId: string,
+	targetLabel: string,
+	items: ImpactItem[],
+};
+
 export type ImportResult = {
 	document: SourceDocument,
 	chaptersCreated: number,
+};
+
+export type InsightResult = {
+	question: string,
+	answer: string,
+	sourceIds: string[],
+	communityIds: string[],
 };
 
 export type IssueActionInput = {
@@ -565,6 +635,7 @@ export type ProjectSummary = {
 	name: string,
 	rootPath: string,
 	mode: string,
+	activeBranchId: string | null,
 	writingLanguage: string,
 	schemaVersion: number,
 	createdAt: string,
@@ -866,6 +937,17 @@ export type TellIssue = {
 	excerpt: string,
 	emotion: string,
 	reason: string,
+};
+
+export type TimelineItem = {
+	id: string,
+	kind: string,
+	label: string,
+	storyTime: string,
+	revealTime: string,
+	branchId: string | null,
+	source: string,
+	detail: string,
 };
 
 /* Tauri Specta runtime */

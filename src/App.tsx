@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { GitBranch, Library } from "lucide-react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Library } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { CanonPage } from "@/features/canon/CanonPage";
@@ -12,6 +12,10 @@ import { SeedPage } from "@/features/seed/SeedPage";
 import { StudioPage } from "@/features/studio/StudioPage";
 import { ipc } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
+
+const MapPage = lazy(() =>
+  import("@/features/map/MapPage").then((module) => ({ default: module.MapPage })),
+);
 
 export default function App() {
   const { ready, project, model, nav, toast } = useAppStore();
@@ -80,13 +84,15 @@ export default function App() {
       {nav === "canon" ? <CanonPage model={model} /> : null}
       {nav === "characters" ? <CharactersPage /> : null}
       {nav === "timeline" ? (
-        <PlaceholderPage
-          eyebrow="Map"
-          title="双时间线"
-          icon={<GitBranch size={20} />}
-          emptyTitle="时间线等待第一件事"
-          description="故事时间与叙述时间分列呈现，事实的有效区间、分支与关系网络会在这里展开。"
-        />
+        <Suspense
+          fallback={
+            <div className="flex h-64 items-center justify-center text-[12px] text-muted">
+              正在加载叙事图…
+            </div>
+          }
+        >
+          <MapPage />
+        </Suspense>
       ) : null}
       {nav === "promises" ? <PromisesPage /> : null}
       {nav === "wiki" ? (

@@ -15,6 +15,7 @@ pub struct ProjectSummary {
     pub name: String,
     pub root_path: String,
     pub mode: String,
+    pub active_branch_id: Option<String>,
     pub writing_language: String,
     pub schema_version: i32,
     pub created_at: String,

@@ -62,6 +62,12 @@ export type {
   RevisionRecord,
   RevisionCompare,
   PreferenceInput,
+  BranchRecord,
+  TimelineItem,
+  GraphData,
+  CommunityReport,
+  InsightResult,
+  ImpactSet,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -319,6 +325,20 @@ export const ipc = {
     guarded(async () => unwrap(await commands.revisionRollback(revisionId))),
   preferenceSave: (input: PreferenceInput) =>
     guarded(async () => unwrap(await commands.preferenceSave(input))),
+  branches: () => guarded(async () => unwrap(await commands.branchList())),
+  branchCreate: (name: string, fromBranchId: string | null = null) =>
+    guarded(async () => unwrap(await commands.branchCreate(name, fromBranchId))),
+  branchSwitch: (id: string) =>
+    guarded(async () => unwrap(await commands.branchSwitch(id))),
+  timeline: (branchId: string | null = null) =>
+    guarded(async () => unwrap(await commands.timelineData(branchId))),
+  graphData: () => guarded(async () => unwrap(await commands.graphData())),
+  communityBuild: () => guarded(async () => unwrap(await commands.communityBuild())),
+  communities: () => guarded(async () => unwrap(await commands.communityList())),
+  impactAnalysis: (entityId: string) =>
+    guarded(async () => unwrap(await commands.impactAnalysis(entityId))),
+  insightQuery: (question: string) =>
+    guarded(async () => unwrap(await commands.insightQuery(question))),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };

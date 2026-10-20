@@ -257,6 +257,7 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
     }
     let payload = candidate.payload.clone();
     let ts = now();
+    let branch_id = crate::branches::current(conn, project_id)?;
     let tx = conn.savepoint()?;
     let created_id = match candidate.kind.as_str() {
         "entity" => {
@@ -342,8 +343,8 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             tx.execute(
                 "INSERT INTO claim (id, project_id, subject, subject_id, predicate, object, object_entity_id,
                     truth_layer, perspective_id, valid_from, valid_to, source_span, confidence, status,
-                    version, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'confirmed',1,?14,?14)",
+                    version, created_at, updated_at, branch_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'confirmed',1,?14,?14,?15)",
                 params![
                     id,
                     project_id,
@@ -358,7 +359,8 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
                     payload.get("validTo").and_then(Value::as_str),
                     span,
                     candidate.confidence,
-                    ts
+                    ts,
+                    branch_id
                 ],
             )?;
             id
@@ -374,8 +376,8 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             }
             tx.execute(
                 "INSERT INTO event (id, project_id, title, participants, place_id, story_time,
-                    reveal_time, cause, outcome, source_span, status, created_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'confirmed',?11)",
+                    reveal_time, cause, outcome, source_span, status, created_at, branch_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'confirmed',?11,?12)",
                 params![
                     id,
                     project_id,
@@ -387,7 +389,8 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
                     payload.get("cause").and_then(Value::as_str).unwrap_or_default(),
                     payload.get("outcome").and_then(Value::as_str).unwrap_or_default(),
                     candidate.source_span.clone().unwrap_or_default(),
-                    ts
+                    ts,
+                    branch_id
                 ],
             )?;
             id
@@ -536,6 +539,7 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             ts
         ],
     )?;
+    crate::graphrag::mark_stale(&tx, project_id)?;
     tx.commit()?;
     let updated = get(conn, project_id, id)?;
     Ok(CandidateAcceptResult {
@@ -896,6 +900,7 @@ pub fn undo_batch(
             ts
         ],
     )?;
+    crate::graphrag::mark_stale(&tx, project_id)?;
     tx.commit()?;
     Ok((undo_revision, restored))
 }

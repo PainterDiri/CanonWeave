@@ -116,6 +116,7 @@ pub fn save_scene(conn: &Connection, project_id: &str, input: &SceneInput) -> Ap
     }
     get_chapter(conn, project_id, &input.chapter_id)?;
     let ts = now();
+    let branch_id = crate::branches::current(conn, project_id)?;
     let id = if let Some(id) = &input.id {
         get_scene(conn, project_id, id)?;
         conn.execute(
@@ -147,7 +148,7 @@ pub fn save_scene(conn: &Connection, project_id: &str, input: &SceneInput) -> Ap
         conn.execute(
             "INSERT INTO scene (id, project_id, chapter_id, number, goal, conflict, pov, story_time,
                 branch_id, place_id, style_profile_id, emotion_beat, sensory_plan, status, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,NULL,?9,?10,?11,?12,'planned',?13,?13)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?13,?9,?10,?11,?12,'planned',?14,?14)",
             params![
                 id,
                 project_id,
@@ -161,7 +162,8 @@ pub fn save_scene(conn: &Connection, project_id: &str, input: &SceneInput) -> Ap
                 input.style_profile_id,
                 serde_json::to_string(&input.emotion_beat)?,
                 serde_json::to_string(&input.sensory_plan)?,
-                ts
+                ts,
+                branch_id
             ],
         )?;
         id

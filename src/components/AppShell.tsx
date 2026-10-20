@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Boxes,
@@ -12,6 +12,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import type { ProjectSnapshot } from "@/lib/ipc";
+import { ipc, type BranchRecord } from "@/lib/ipc";
 import { useAppStore, type NavKey, type WorkspaceMode } from "@/stores/ui";
 
 const navItems: { key: NavKey; label: string; icon: typeof Compass; mode: WorkspaceMode }[] = [
@@ -46,6 +47,38 @@ export function AppShell({
   const setNav = useAppStore((s) => s.setNav);
   const setMode = useAppStore((s) => s.setMode);
   const activeMode = useAppStore((s) => s.activeMode);
+  const refreshProject = useAppStore((s) => s.refreshProject);
+  const notify = useAppStore((s) => s.notify);
+  const [branches, setBranches] = useState<BranchRecord[]>([]);
+
+  useEffect(() => {
+    void ipc
+      .branches()
+      .then(setBranches)
+      .catch(() => {});
+  }, []);
+
+  const switchBranch = async (id: string) => {
+    try {
+      setBranches(await ipc.branchSwitch(id));
+      await refreshProject();
+    } catch {
+      notify("切换分支失败");
+    }
+  };
+
+  const addBranch = async () => {
+    const name = window.prompt("新分支名称");
+    if (!name?.trim()) return;
+    try {
+      await ipc.branchCreate(name.trim());
+      setBranches(await ipc.branches());
+      await refreshProject();
+      notify(`已建立分支：${name}`);
+    } catch {
+      notify("建立分支失败");
+    }
+  };
 
   const go = (key: NavKey) => {
     const item = navItems.find((n) => n.key === key);
@@ -143,7 +176,27 @@ export function AppShell({
               ))}
             </div>
             <div className="hidden h-4 w-px bg-line md:block" />
-            <HeaderMeta icon={<GitBranch size={12} />} label="主线" />
+            <div className="hidden items-center gap-1.5 text-[10.5px] text-muted lg:flex">
+              <GitBranch size={12} className="text-teal/60" />
+              <select
+                value={branches.find((branch) => branch.isCurrent)?.id ?? project.project.activeBranchId ?? ""}
+                onChange={(e) => void switchBranch(e.target.value)}
+                className="max-w-[110px] rounded border border-line bg-paper-raised px-1.5 py-0.5 text-[10px] text-ink-soft"
+              >
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => void addBranch()}
+                className="rounded px-1 text-teal/70 hover:bg-teal-soft"
+                title="从当前分支建立新分支"
+              >
+                +
+              </button>
+            </div>
             <HeaderMeta icon={<MapIcon size={12} />} label="POV 未设定" />
             <HeaderMeta icon={<Compass size={12} />} label="时间未设定" />
           </div>

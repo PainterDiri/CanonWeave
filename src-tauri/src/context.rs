@@ -33,24 +33,26 @@ fn claims_for_layer(
     project_id: &str,
     layer: &str,
     pov: &str,
+    branch_id: Option<&str>,
 ) -> AppResult<String> {
     let sql = match layer {
         "L0" => {
             "SELECT subject, predicate, object, source_span, locked FROM claim
-             WHERE project_id=?1 AND status='confirmed' AND truth_layer='world'
+             WHERE project_id=?1 AND (branch_id IS NULL OR branch_id=?2)
+               AND status='confirmed' AND truth_layer='world'
              ORDER BY locked DESC, updated_at DESC LIMIT 80"
         }
         _ => {
             "SELECT subject, predicate, object, source_span, locked FROM claim
-             WHERE project_id=?1 AND status='confirmed'
-               AND (truth_layer='world' OR perspective_id=?2 OR perspective_id IS NULL)
+             WHERE project_id=?1 AND (branch_id IS NULL OR branch_id=?2) AND status='confirmed'
+               AND (truth_layer='world' OR perspective_id=?3 OR perspective_id IS NULL)
                AND truth_layer IN ('world','belief','utterance')
              ORDER BY truth_layer='world' DESC, updated_at DESC LIMIT 60"
         }
     };
     let mut stmt = conn.prepare(sql)?;
     let rows = if layer == "L0" {
-        stmt.query_map([project_id], |row| {
+        stmt.query_map(params![project_id, branch_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -61,7 +63,7 @@ fn claims_for_layer(
         })?
         .collect::<Result<Vec<_>, _>>()?
     } else {
-        stmt.query_map(params![project_id, pov], |row| {
+        stmt.query_map(params![project_id, branch_id, pov], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -256,6 +258,7 @@ pub fn compile(
 ) -> AppResult<ContextPreview> {
     let budget = budget.clamp(2000, 60000);
     let scene = scenes::get_scene(conn, project_id, scene_id)?;
+    let branch = crate::branches::current(conn, project_id)?;
     let chapter = scenes::get_chapter(conn, project_id, &scene.chapter_id)?;
     let premise = seed::active(conn, project_id)?;
     let mut sections = Vec::new();
@@ -270,7 +273,7 @@ pub fn compile(
     for (layer, title, percent) in LAYER_BUDGETS {
         let section_budget = (budget as f64 * *percent as f64 / 100.0).round() as i32;
         let content = match *layer {
-            "L0" => claims_for_layer(conn, project_id, "L0", &scene.pov)?,
+            "L0" => claims_for_layer(conn, project_id, "L0", &scene.pov, branch.as_deref())?,
             "L1" => {
                 let premise_text = premise
                     .as_ref()
@@ -286,7 +289,7 @@ pub fn compile(
                     chapter.number, chapter.title, scene.goal, scene.conflict
                 )
             }
-            "L2" => claims_for_layer(conn, project_id, "L2", &scene.pov)?,
+            "L2" => claims_for_layer(conn, project_id, "L2", &scene.pov, branch.as_deref())?,
             "L3" => "叙事百科尚未编译。本层只提供导航占位，不得替代原文证据。".into(),
             "L4" => promises.clone(),
             "L5" => evidence_block(conn, project_id, &scene, &due_titles)?,

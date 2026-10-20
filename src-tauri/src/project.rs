@@ -22,6 +22,8 @@ struct ProjectFile {
     writing_language: String,
     schema_version: i32,
     created_at: String,
+    #[serde(default)]
+    current_branch_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -61,6 +63,7 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
     }
 
     let id = uuid::Uuid::new_v4().to_string();
+    let main_branch_id = format!("main-{id}");
     let ts = now();
     let language = input
         .writing_language
@@ -71,8 +74,9 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
     let mut conn = db::open(&root.join(DB_FILE))?;
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO project (id, name, root_path, schema_version, writing_language, mode, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        "INSERT INTO project (id, name, root_path, schema_version, writing_language, mode,
+            created_at, updated_at, current_branch_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
         params![
             id,
             name,
@@ -80,12 +84,13 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
             db::SCHEMA_VERSION as i32,
             language,
             input.mode,
-            ts
+            ts,
+            main_branch_id.clone()
         ],
     )?;
     tx.execute(
         "INSERT INTO branch (id, project_id, name, status, created_at) VALUES (?1, ?2, '主线', 'active', ?3)",
-        params![format!("main-{id}"), id, ts],
+        params![main_branch_id.clone(), id, ts],
     )?;
     tx.execute(
         "INSERT INTO review_policy (id, project_id, scope, scope_id, mode, auto_accept_level, sample_rate, lock_hard, updated_at)
@@ -102,6 +107,7 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
         writing_language: language.clone(),
         schema_version: db::SCHEMA_VERSION as i32,
         created_at: ts.clone(),
+        current_branch_id: Some(main_branch_id.clone()),
     };
     write_project_file(&root, &file)?;
 
@@ -111,6 +117,7 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
             name: name.to_string(),
             root_path: root.to_string_lossy().into_owned(),
             mode: input.mode.clone(),
+            active_branch_id: Some(main_branch_id),
             writing_language: language,
             schema_version: db::SCHEMA_VERSION as i32,
             created_at: ts.clone(),
@@ -140,7 +147,7 @@ pub fn open(root: &Path) -> AppResult<LoadedProject> {
     let conn = db::open(&root.join(DB_FILE))?;
     let summary = conn
         .query_row(
-            "SELECT id, name, root_path, mode, writing_language, schema_version, created_at, updated_at
+            "SELECT id, name, root_path, mode, current_branch_id, writing_language, schema_version, created_at, updated_at
              FROM project WHERE id = ?1",
             [&file.id],
             |row| {
@@ -149,10 +156,11 @@ pub fn open(root: &Path) -> AppResult<LoadedProject> {
                     name: row.get(1)?,
                     root_path: row.get(2)?,
                     mode: row.get(3)?,
-                    writing_language: row.get(4)?,
-                    schema_version: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    active_branch_id: row.get(4)?,
+                    writing_language: row.get(5)?,
+                    schema_version: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )

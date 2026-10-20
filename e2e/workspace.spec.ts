@@ -7,6 +7,7 @@ const project = {
     name: "雨夜的第七封信",
     rootPath: "/Users/writer/Stories/rain-night",
     mode: "both",
+    activeBranchId: "main-demo",
     writingLanguage: "zh-CN",
     schemaVersion: 1,
     createdAt: "2026-10-20T08:00:00Z",
@@ -176,6 +177,66 @@ async function installMock(page: import("@playwright/test").Page) {
               return args?.kind === "draft" ? [] : [candidate, candidate2];
             case "chapter_list":
               return chapters;
+            case "branch_list":
+              return [
+                {
+                  id: "main-demo",
+                  name: "主线",
+                  parentBranchId: null,
+                  status: "active",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  isCurrent: true,
+                },
+              ];
+            case "timeline_data":
+              return [
+                {
+                  id: "ev1",
+                  kind: "event",
+                  label: "葬礼当夜",
+                  storyTime: "第1日 23:00",
+                  revealTime: "第1章",
+                  branchId: null,
+                  source: "ch01:p1",
+                  detail: "林澈收到下周寄出的信",
+                },
+                {
+                  id: "ev2",
+                  kind: "event",
+                  label: "旧车站开启",
+                  storyTime: "第2日 02:00",
+                  revealTime: "第4章",
+                  branchId: "main-demo",
+                  source: "ch04:p11",
+                  detail: "母亲承认曾经去过车站",
+                },
+              ];
+            case "graph_data":
+              return {
+                nodes: [
+                  { id: "e1", label: "林澈", kind: "character", community: 0 },
+                  { id: "e2", label: "母亲", kind: "character", community: 0 },
+                  { id: "e3", label: "旧车站", kind: "place", community: 0 },
+                ],
+                edges: [
+                  { id: "r1", from: "e1", to: "e2", label: "母子" },
+                  { id: "r2", from: "e2", to: "e3", label: "守夜人" },
+                ],
+              };
+            case "community_list":
+              return [
+                {
+                  id: "comm1",
+                  level: 0,
+                  title: "关系簇 · 林澈 / 母亲 / 旧车站",
+                  memberIds: ["e1", "e2", "e3"],
+                  sourceIds: ["ch01:p1", "ch04:p11"],
+                  content: "母亲与旧车站之间存在尚未解释的联系；林澈的调查正在把家庭秘密推向公开。",
+                  summaryHash: "hash1",
+                  generatedAt: "2026-10-20T08:00:00Z",
+                  staleAt: null,
+                },
+              ];
             case "chapter_text_get":
               return "雨落在旧灯上。\n\n林澈把信摊在掌心，纸页的边缘被水汽泡得发软。母亲站在门口，没有进来，也没有说话。\n\n他听见楼下有人在喊父亲的名字。";
             case "scene_list":
@@ -423,4 +484,11 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "文笔", exact: true }).click();
   await page.waitForTimeout(450);
   await page.screenshot({ path: path.join("test-results", "style.png") });
+
+  await page.getByRole("button", { name: "时间线", exact: true }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join("test-results", "map.png") });
+  await page.getByRole("button", { name: "关系图", exact: true }).click();
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: path.join("test-results", "graph.png") });
 });
