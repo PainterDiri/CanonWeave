@@ -132,5 +132,6 @@ pub fn review_batch_apply(
         revision_id,
         accepted,
         rejected: 0,
+        sampled: 0,
     })
 }

@@ -12,7 +12,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, SectionTitle } from "@/components/ui";
-import { ipc, isTauri, type ModelConfig, type SourceDocument } from "@/lib/ipc";
+import { ipc, isTauri, type ModelConfig, type RuleRecord, type SourceDocument } from "@/lib/ipc";
 import { StylePage } from "@/features/style/StylePage";
 import { useAppStore } from "@/stores/ui";
 
@@ -52,14 +52,92 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
       {tab === "import" ? <ImportPanel /> : null}
       {tab === "style" ? <StylePage /> : null}
       {tab === "rules" ? (
-        <EmptyState
-          icon={<ShieldAlert size={20} />}
-          title="规则编译器将在下一阶段接入"
-          description="硬规则会编译为可执行谓词；复杂时间与资源约束交给 Z3，并返回可映射回原文的冲突核心。"
-          action={<Badge tone="amber">M3</Badge>}
-        />
+        <RulesPanel />
       ) : null}
     </div>
+  );
+}
+
+function RulesPanel() {
+  const [rules, setRules] = useState<RuleRecord[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRules(await ipc.rules());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async () => {
+    try {
+      const result = await ipc.auditRun();
+      setMessage(`审计完成，新增 ${result.issuesCreated} 个问题`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <section className="paper-card p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+            <ShieldAlert size={15} className="text-teal" />
+            规则编译器
+          </div>
+          <p className="mt-1.5 max-w-2xl text-[11.5px] leading-6 text-muted">
+            普通规则走 SQL 快速检查；时间、地点、物品与排他条件交给 Z3，返回的 unsat core 会映射回事实和原文证据。
+          </p>
+        </div>
+        <Button size="sm" tone="primary" onClick={() => void run()}>
+          运行全量审计
+        </Button>
+      </div>
+      {message ? (
+        <div className="mt-4 rounded-lg border border-teal/20 bg-teal-soft/50 px-3.5 py-2 text-[11px] text-teal">
+          {message}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="mt-4 rounded-lg border border-coral/20 bg-coral-soft/50 px-3.5 py-2 text-[11px] text-coral">
+          {error}
+        </div>
+      ) : null}
+      <div className="mt-5 space-y-2">
+        {rules.map((rule) => (
+          <div
+            key={rule.id}
+            className="flex items-center justify-between rounded-lg border border-line bg-paper/60 px-3.5 py-3"
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] text-ink">{rule.code}</span>
+                <Badge tone={rule.constraintLayer === "hard" ? "coral" : "neutral"}>
+                  {rule.constraintLayer}
+                </Badge>
+                <Badge tone={rule.severity === "block" ? "coral" : "amber"}>
+                  {rule.severity}
+                </Badge>
+              </div>
+              <div className="mt-1 text-[10.5px] text-muted">{rule.description}</div>
+            </div>
+            <span className={`text-[9.5px] ${rule.enabled ? "text-teal" : "text-muted"}`}>
+              {rule.enabled ? "启用" : "停用"}
+            </span>
+          </div>
+        ))}
+        {!rules.length ? (
+          <div className="py-8 text-center text-[11px] text-muted">没有规则</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

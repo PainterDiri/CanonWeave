@@ -258,6 +258,49 @@ async function installMock(page: import("@playwright/test").Page) {
                 candidates: [candidate, candidate2],
                 counts: { l0: 0, l1: 1, l2: 1, l3: 0, total: 2 },
               };
+            case "review_policy_get":
+              return {
+                id: "pol1",
+                scope: "project",
+                scopeId: null,
+                mode: "balanced",
+                autoAcceptLevel: "L0",
+                sampleRate: 0,
+                lockHard: true,
+                updatedAt: "2026-10-20T08:00:00Z",
+              };
+            case "issue_list":
+              return [
+                {
+                  id: "i1",
+                  ruleId: "r1",
+                  ruleCode: "dead_character_acts",
+                  constraintLayer: "hard",
+                  severity: "block",
+                  claimIds: ["c1", "e1"],
+                  evidenceSpans: ["ch03:p42-44｜父亲已经死亡", "ch09:p18-20｜林澈在雨里奔跑"],
+                  explanation: "父亲在第 3 章死亡，但第 9 章以现实行动出现。",
+                  certificate: {
+                    ruleId: "dead_character_acts",
+                    severity: "block",
+                    claimIds: ["c1", "e1"],
+                    evidenceSpans: ["ch03:p42-44", "ch09:p18-20"],
+                    solverCore: ["claim:c1:dead", "event:e1:real_action", "rule:dead_character_acts"],
+                    explanation: "父亲在第 3 章死亡，但第 9 章以现实行动出现。",
+                    suggestedActions: ["修改正文", "标记为回忆", "建立分支"],
+                  },
+                  solverCore: ["claim:c1:dead", "event:e1:real_action", "rule:dead_character_acts"],
+                  riskLevel: "L3",
+                  fingerprint: "fp1",
+                  status: "open",
+                  deferredUntil: null,
+                  createdAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "rule_list":
+              return [];
+            case "revision_list":
+              return [];
             case "character_list":
               return [
                 {

@@ -14,6 +14,9 @@ import {
   type BeatOption,
   type StyleProfileInput,
   type StyleSampleInput,
+  type ReviewPolicyInput,
+  type IssueActionInput,
+  type PreferenceInput,
 } from "./bindings";
 
 export type {
@@ -49,6 +52,16 @@ export type {
   BeatOption,
   BatchPreview,
   BatchResult,
+  ReviewPolicy,
+  PolicyApplyResult,
+  BatchUndoResult,
+  ReviewSampleRow,
+  RuleRecord,
+  AuditIssue,
+  AuditRunResult,
+  RevisionRecord,
+  RevisionCompare,
+  PreferenceInput,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -267,6 +280,45 @@ export const ipc = {
     guarded(async () => unwrap(await commands.reviewBatchPreview(ids))),
   reviewBatchApply: (ids: string[], chapterId: string | null = null) =>
     guarded(async () => unwrap(await commands.reviewBatchApply(ids, chapterId))),
+  reviewPolicyGet: (scope: string | null = "project", scopeId: string | null = null) =>
+    guarded(async () => unwrap(await commands.reviewPolicyGet(scope, scopeId))),
+  reviewPolicySave: (input: ReviewPolicyInput) =>
+    guarded(async () => unwrap(await commands.reviewPolicySave(input))),
+  reviewPolicyApply: (candidateIds: string[] | null = null) =>
+    guarded(async () => unwrap(await commands.reviewPolicyApply(candidateIds))),
+  reviewBatchUndo: (batchId: string) =>
+    guarded(async () => unwrap(await commands.reviewBatchUndo(batchId))),
+  reviewSamples: () => guarded(async () => unwrap(await commands.reviewSampleList())),
+  rules: () => guarded(async () => unwrap(await commands.ruleList())),
+  auditRun: () => guarded(async () => unwrap(await commands.auditRun())),
+  issues: (status: string | null = "open") =>
+    guarded(async () => unwrap(await commands.issueList(status))),
+  issueAction: (input: IssueActionInput) =>
+    guarded(async () => unwrap(await commands.issueAction(input))),
+  draftAcceptVariant: (
+    candidateId: string,
+    chapterId: string,
+    useRefined: boolean,
+    acknowledgeFactChanges: boolean,
+  ) =>
+    guarded(async () =>
+      unwrap(
+        await commands.draftAcceptVariant(
+          candidateId,
+          chapterId,
+          useRefined,
+          acknowledgeFactChanges,
+        ),
+      ),
+    ),
+  revisions: (chapterId: string | null) =>
+    guarded(async () => unwrap(await commands.revisionList(chapterId))),
+  revisionCompare: (fromId: string, toId: string) =>
+    guarded(async () => unwrap(await commands.revisionCompare(fromId, toId))),
+  revisionRollback: (revisionId: string) =>
+    guarded(async () => unwrap(await commands.revisionRollback(revisionId))),
+  preferenceSave: (input: PreferenceInput) =>
+    guarded(async () => unwrap(await commands.preferenceSave(input))),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };

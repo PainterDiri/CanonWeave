@@ -92,6 +92,7 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
          VALUES (?1, ?2, 'project', ?2, 'balanced', 'L0', 0.0, 1, ?3)",
         params![format!("policy-{id}"), id, ts],
     )?;
+    crate::rules::seed_defaults(&tx, &id)?;
     tx.commit()?;
 
     let file = ProjectFile {

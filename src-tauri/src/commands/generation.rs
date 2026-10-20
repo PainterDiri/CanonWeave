@@ -14,7 +14,7 @@ use crate::{
     },
     error::IpcResult,
     llm::{parse_json_loose, ChatTurn, LlmClient},
-    scenes, seed, state::AppState, style,
+    entities, fact_delta, scenes, seed, state::AppState, style,
 };
 
 fn generation_system_prompt() -> &'static str {
@@ -24,6 +24,10 @@ fn generation_system_prompt() -> &'static str {
      篇幅 900 至 1600 字，场景结束时必须发生可记录的状态变化。"
 }
 
+fn payload_text_len(text: &str) -> usize {
+    text.chars().filter(|c| !c.is_whitespace()).count()
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn generation_start(
@@ -31,14 +35,14 @@ pub fn generation_start(
     state: State<'_, AppState>,
     input: GenerationInput,
 ) -> IpcResult<GenerationStartResult> {
-    if input.mode != "quick" {
-        return Err("M2 先支持快速模式；精修模式与 fact_delta 将在 M3 接入".into());
+    if !["quick", "refined"].contains(&input.mode.as_str()) {
+        return Err("生成模式必须是 quick 或 refined".into());
     }
     let config = state.model_store.load();
     let key = crate::model::load_api_key()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "尚未保存 API Key，请先在设置中填写并测试连接".to_string())?;
-    let (project_id, scene, chapter, preview, style_version) = {
+    let (project_id, scene, chapter, preview, style_version, style_profile, entity_names) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let scene = scenes::get_scene(&loaded.conn, &loaded.summary.id, &input.scene_id)
@@ -53,26 +57,29 @@ pub fn generation_start(
             input.style_profile_id.as_deref(),
         )
         .map_err(|e| e.to_string())?;
-        let style_version = style::list(&loaded.conn, &loaded.summary.id)
-            .map_err(|e| e.to_string())?
-            .into_iter()
+        let profiles = style::list(&loaded.conn, &loaded.summary.id).map_err(|e| e.to_string())?;
+        let style_profile = profiles
+            .iter()
             .find(|profile| {
                 Some(&profile.id) == input.style_profile_id.as_ref()
                     || Some(&profile.id) == scene.style_profile_id.as_ref()
             })
-            .or_else(|| {
-                style::list(&loaded.conn, &loaded.summary.id)
-                    .ok()
-                    .and_then(|list| list.into_iter().find(|p| p.scope == "project"))
-            })
-            .map(|profile| profile.version)
-            .unwrap_or(0);
+            .cloned()
+            .or_else(|| profiles.into_iter().find(|p| p.scope == "project"));
+        let style_version = style_profile.as_ref().map(|p| p.version).unwrap_or(0);
+        let entity_names = entities::list(&loaded.conn, &loaded.summary.id, Some("character"))
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|entity| entity.canonical_name)
+            .collect::<Vec<_>>();
         (
             loaded.summary.id.clone(),
             scene,
             chapter,
             preview,
             style_version,
+            style_profile,
+            entity_names,
         )
     };
     let run_id = uuid::Uuid::new_v4().to_string();
@@ -121,6 +128,9 @@ pub fn generation_start(
     let budget = preview.budget;
     let model_name = config.model.clone();
     let style_for_task = input.style_profile_id.clone();
+    let mode_for_task = input.mode.clone();
+    let style_profile_for_task = style_profile;
+    let entity_names_for_task = entity_names;
     let app_for_task = app.clone();
     tauri::async_runtime::spawn(async move {
         let client = match LlmClient::new(&config, key) {
@@ -161,35 +171,110 @@ pub fn generation_start(
             map.remove(&format!("gen:{run_for_task}"));
         }
         match result {
-            Ok(text) => {
-                let outcome = (|| -> Result<String, String> {
+            Ok(raw_text) => {
+                let outcome: Result<String, String> = async {
+                    let mut refined_text = String::new();
+                    let mut delta = None;
+                    let mut style_report = None;
+                    let mut refined_error = String::new();
+                    if mode_for_task == "refined" {
+                        let contract = style_profile_for_task
+                            .as_ref()
+                            .map(style::contract)
+                            .unwrap_or_else(|| "遵循作者已建立的表达偏好，不添加解释性抒情。".into());
+                        let prompt = format!(
+                            "{contract}\n\n[润色硬约束]\n只修改表达、句法、意象和节奏；不得改名、改数字、改死亡状态、改地点、改时间或持有物。\n不得增加原文没有的世界事实。只输出润色后的正文。\n\n[原文]\n{raw_text}"
+                        );
+                        match client
+                            .complete(
+                                &[
+                                    ChatTurn::system(
+                                        "你是中文小说文笔润色器。你只能优化表达，不能改变事实。",
+                                    ),
+                                    ChatTurn::user(prompt),
+                                ],
+                                Some(6000),
+                            )
+                            .await
+                        {
+                            Ok(text) => {
+                                delta = Some(fact_delta::compare(
+                                    &raw_text,
+                                    &text,
+                                    &entity_names_for_task,
+                                ));
+                                style_report = style_profile_for_task
+                                    .as_ref()
+                                    .map(|profile| style::check(&text, profile));
+                                refined_text = text;
+                            }
+                            Err(error) => refined_error = error.to_string(),
+                        }
+                    }
+                    let delta = delta.unwrap_or_else(|| fact_delta::compare(
+                        &raw_text,
+                        if refined_text.is_empty() {
+                            &raw_text
+                        } else {
+                            &refined_text
+                        },
+                        &entity_names_for_task,
+                    ));
                     let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
                     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
-                    let word_count = text.chars().count();
+                    let use_refined = mode_for_task == "refined" && !refined_text.is_empty();
+                    let candidate_kind = if use_refined { "draft_refined" } else { "draft" };
+                    let payload = json!({
+                        "text": if use_refined { &refined_text } else { &raw_text },
+                        "rawText": raw_text.clone(),
+                        "refinedText": refined_text.clone(),
+                        "sceneId": scene_for_task.clone(),
+                        "chapterId": chapter_for_task.clone(),
+                        "runId": run_for_task.clone(),
+                        "mode": mode_for_task,
+                        "contextHash": context_hash,
+                        "styleProfileId": style_for_task,
+                        "wordCount": if use_refined {
+                            payload_text_len(&refined_text)
+                        } else {
+                            payload_text_len(&raw_text)
+                        },
+                        "factDelta": delta.clone(),
+                        "styleCheck": style_report,
+                        "refinedError": refined_error.clone(),
+                        "possibleInflation": delta.possible_inflation
+                    });
                     let candidate = candidates::insert(
                         &loaded.conn,
                         &project_for_task,
-                        "draft",
-                        json!({
-                            "text": text,
-                            "sceneId": scene_for_task.clone(),
-                            "chapterId": chapter_for_task.clone(),
-                            "runId": run_for_task.clone(),
-                            "mode": "quick",
-                            "contextHash": context_hash,
-                            "styleProfileId": style_for_task,
-                            "wordCount": word_count
-                        }),
+                        candidate_kind,
+                        payload,
                         Some(&format!("scene:{scene_for_task}")),
                         None,
                         0.8,
                     )
                     .map_err(|e| e.to_string())?;
+                    if delta.blocked || (!refined_error.is_empty() && mode_for_task == "refined") {
+                        loaded
+                            .conn
+                            .execute(
+                                "UPDATE candidate SET risk_level='L3' WHERE id=?1",
+                                [&candidate.id],
+                            )
+                            .map_err(|e| e.to_string())?;
+                    }
                     loaded
                         .conn
                         .execute(
-                            "UPDATE generation_run SET status='done', candidate_id=?2 WHERE id=?1",
-                            rusqlite::params![run_for_task.clone(), candidate.id],
+                            "UPDATE generation_run SET status='done', candidate_id=?2,
+                                raw_text=?3, refined_text=?4, fact_delta=?5 WHERE id=?1",
+                            rusqlite::params![
+                                run_for_task.clone(),
+                                candidate.id,
+                                raw_text,
+                                refined_text,
+                                serde_json::to_string(&delta).map_err(|e| e.to_string())?
+                            ],
                         )
                         .map_err(|e| e.to_string())?;
                     let _ = app_for_task.emit(
@@ -197,11 +282,15 @@ pub fn generation_start(
                         GenerationFinished {
                             run_id: run_for_task.clone(),
                             candidate_id: Some(candidate.id.clone()),
-                            status: "done".into(),
+                            status: if delta.blocked {
+                                "refined_blocked".into()
+                            } else {
+                                "done".into()
+                            },
                         },
                     );
                     Ok(candidate.id)
-                })();
+                }.await;
                 if let Err(error) = outcome {
                     finish_error(&app_for_task, &run_for_task, &error);
                 }

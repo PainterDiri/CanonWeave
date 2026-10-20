@@ -183,6 +183,7 @@ pub struct BatchResult {
     pub revision_id: String,
     pub accepted: i32,
     pub rejected: i32,
+    pub sampled: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

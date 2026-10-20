@@ -6,6 +6,7 @@ mod db;
 mod domain;
 mod entities;
 mod error;
+mod fact_delta;
 mod import;
 mod llm;
 mod model;
@@ -13,6 +14,10 @@ mod outline;
 mod project;
 mod promises;
 mod retrieval;
+mod review;
+mod revisions;
+mod rules;
+mod solver;
 mod scenes;
 mod seed;
 mod state;
@@ -60,7 +65,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
         , chapter_list, scene_list, scene_save, scene_contract_text, context_preview,
         chapter_text_get, draft_accept, generation_start, generation_cancel, generation_runs,
         plot_beats, scene_from_beat, chat_continue, chat_to_scene, review_batch_preview,
-        review_batch_apply, chapter_text_save
+        review_batch_apply, chapter_text_save, review_policy_get, review_policy_save,
+        review_policy_apply, review_batch_undo, review_sample_list, rule_list, audit_run,
+        issue_list, issue_action, draft_accept_variant
+        , revision_list, revision_compare, revision_rollback, preference_save
     ])
 }
 

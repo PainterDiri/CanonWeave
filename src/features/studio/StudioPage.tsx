@@ -28,6 +28,7 @@ import {
   type ChapterRecord,
   type ContextPreview,
   type GenerationRunRow,
+  type RevisionRecord,
   type SceneRecord,
   type StyleCheck,
   type StyleProfile,
@@ -84,11 +85,14 @@ export function StudioPage() {
   const [lastCandidate, setLastCandidate] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Candidate[]>([]);
   const [runs, setRuns] = useState<GenerationRunRow[]>([]);
+  const [revisions, setRevisions] = useState<RevisionRecord[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sceneForm, setSceneForm] = useState<SceneForm | null>(null);
   const [context, setContext] = useState<ContextPreview | null>(null);
   const [styleReport, setStyleReport] = useState<StyleCheck | null>(null);
   const [instruction, setInstruction] = useState("");
   const [styleOverride, setStyleOverride] = useState("");
+  const [generationMode, setGenerationMode] = useState<"quick" | "refined">("quick");
   const [centerTab, setCenterTab] = useState<"generate" | "chapter">("generate");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,13 +109,18 @@ export function StudioPage() {
   }, []);
 
   const loadChapter = useCallback(async (id: string) => {
-    const [sceneList, text] = await Promise.all([ipc.scenes(id), ipc.chapterText(id)]);
+    const [sceneList, text, revisionList] = await Promise.all([
+      ipc.scenes(id),
+      ipc.chapterText(id),
+      ipc.revisions(id),
+    ]);
     setScenes(sceneList);
     setSceneId((current) =>
       sceneList.some((scene) => scene.id === current) ? current : (sceneList[0]?.id ?? null),
     );
     setChapterText(text);
     setEditorText(text);
+    setRevisions(revisionList);
     setOutput("");
     setStyleReport(null);
   }, []);
@@ -198,7 +207,7 @@ export function StudioPage() {
     try {
       const result = await ipc.generationStart({
         sceneId: currentScene.id,
-        mode: "quick",
+        mode: generationMode,
         styleProfileId: styleOverride || currentScene.styleProfileId,
         extraInstruction: instruction.trim() || null,
       });
@@ -246,11 +255,21 @@ export function StudioPage() {
     }
   };
 
-  const acceptDraft = async (candidateId: string) => {
+  const acceptDraft = async (
+    candidateId: string,
+    useRefined = true,
+    acknowledge = false,
+  ) => {
     if (!chapterId) return;
     setBusy(true);
     try {
-      await ipc.draftAccept(candidateId, chapterId);
+      if (acknowledge) {
+        const approved = window.confirm(
+          "精修版本改变了可核实事实。确认要连同这些变化一起写入正文吗？",
+        );
+        if (!approved) return;
+      }
+      await ipc.draftAcceptVariant(candidateId, chapterId, useRefined, acknowledge);
       await loadChapter(chapterId);
       await loadDrafts();
       await refreshProject();
@@ -267,6 +286,23 @@ export function StudioPage() {
     try {
       await ipc.chapterTextSave(chapterId, editorText);
       setChapterText(editorText);
+      setRevisions(await ipc.revisions(chapterId));
+      await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rollback = async (revisionId: string) => {
+    if (!chapterId) return;
+    if (!window.confirm("回滚会新建一个版本，不会删除历史。继续吗？")) return;
+    setBusy(true);
+    try {
+      await ipc.revisionRollback(revisionId);
+      await loadChapter(chapterId);
+      setHistoryOpen(false);
       await refreshProject();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -364,7 +400,7 @@ export function StudioPage() {
         title="正文工坊"
         action={
           <div className="flex items-center gap-2">
-            <Badge tone="teal">快速模式</Badge>
+            <Badge tone="teal">{generationMode === "refined" ? "精修模式" : "快速模式"}</Badge>
             {currentChapter?.currentRevisionId ? <Badge tone="neutral">已有版本</Badge> : null}
           </div>
         }
@@ -569,6 +605,15 @@ export function StudioPage() {
                         </option>
                       ))}
                     </select>
+                    <select
+                      value={generationMode}
+                      onChange={(e) => setGenerationMode(e.target.value as "quick" | "refined")}
+                      className="h-10 rounded-[10px] border border-line-strong bg-paper-raised px-2 text-[10.5px]"
+                      disabled={Boolean(runId)}
+                    >
+                      <option value="quick">快速</option>
+                      <option value="refined">精修</option>
+                    </select>
                     {runId ? (
                       <Button size="md" onClick={() => void cancel()} icon={<Square size={12} />}>
                         停止
@@ -595,14 +640,19 @@ export function StudioPage() {
                       <span className="text-[10px] font-medium tracking-wide text-muted">
                         当前正文 · {chapterText.length} 字
                       </span>
-                      <Button
-                        size="sm"
-                        tone="primary"
-                        onClick={() => void saveChapter()}
-                        disabled={busy || editorText === chapterText}
-                      >
-                        保存新版本
-                      </Button>
+                      <div className="flex gap-1.5">
+                        <Button size="sm" onClick={() => setHistoryOpen(true)}>
+                          版本历史
+                        </Button>
+                        <Button
+                          size="sm"
+                          tone="primary"
+                          onClick={() => void saveChapter()}
+                          disabled={busy || editorText === chapterText}
+                        >
+                          保存新版本
+                        </Button>
+                      </div>
                     </div>
                     <Textarea
                       value={editorText}
@@ -660,27 +710,59 @@ export function StudioPage() {
                     生成或“继续写”的草稿会进入这里，接受后才写入正文。
                   </div>
                 ) : (
-                  drafts.map((draft) => (
+                  drafts.map((draft) => {
+                    const factDelta = draft.payload.factDelta;
+                    const blocked = Boolean(factDelta?.blocked);
+                    const refined = draft.kind === "draft_refined";
+                    return (
                     <div key={draft.id} className="mb-2 rounded-lg border border-line bg-paper/60 p-2.5">
                       <div className="text-[9px] text-muted">
-                        {draft.payload.source === "chat_continue" ? "对话续写" : "场景生成"} ·{" "}
+                        {draft.payload.source === "chat_continue"
+                          ? "对话续写"
+                          : refined
+                            ? "精修草稿"
+                            : "场景生成"}{" "}
+                        ·{" "}
                         {draft.payload.wordCount ?? "—"} 字
                       </div>
                       <p className="mt-1 line-clamp-4 text-[10px] leading-4 text-ink-soft">
                         {String(draft.payload.text ?? "").slice(0, 160)}
                       </p>
-                      <div className="mt-1.5 flex justify-end">
+                      {factDelta?.changes?.length ? (
+                        <div className="mt-1.5 rounded bg-coral-soft/60 px-1.5 py-1 text-[8.5px] leading-4 text-coral">
+                          {factDelta.changes
+                            .slice(0, 2)
+                            .map((change: { message: string }) => change.message)
+                            .join("；")}
+                        </div>
+                      ) : null}
+                      {factDelta?.possibleInflation ? (
+                        <div className="mt-1 text-[8.5px] text-amber">
+                          字数增长超过 25%，可能注水
+                        </div>
+                      ) : null}
+                      <div className="mt-1.5 flex justify-end gap-1">
+                        {refined ? (
+                          <Button
+                            size="sm"
+                            tone="ghost"
+                            onClick={() => void acceptDraft(draft.id, false)}
+                            disabled={!chapterId}
+                          >
+                            用原文
+                          </Button>
+                        ) : null}
                         <Button
                           size="sm"
                           tone="ghost"
-                          onClick={() => void acceptDraft(draft.id)}
+                          onClick={() => void acceptDraft(draft.id, refined, blocked)}
                           disabled={!chapterId}
                         >
-                          写入
+                          {refined ? (blocked ? "确认并写入" : "接受精修") : "写入"}
                         </Button>
                       </div>
                     </div>
-                  ))
+                  );})
                 )}
               </div>
             </section>
@@ -737,6 +819,42 @@ export function StudioPage() {
         onSave={saveScene}
       />
       <ContextModal context={context} onClose={() => setContext(null)} />
+      <Modal
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        title="版本历史"
+        description="每次保存、接受草稿和批量审核都会留下 revision。回滚同样会生成新版本。"
+        width="max-w-[620px]"
+        footer={
+          <Button tone="ghost" onClick={() => setHistoryOpen(false)}>
+            关闭
+          </Button>
+        }
+      >
+        <div className="space-y-2">
+          {revisions.map((revision) => (
+            <div
+              key={revision.id}
+              className="flex items-center justify-between rounded-lg border border-line bg-paper/60 px-3 py-2.5"
+            >
+              <div>
+                <div className="text-[11px] font-medium text-ink">
+                  {revision.authorAction}
+                </div>
+                <div className="mt-0.5 font-mono text-[9px] text-muted">
+                  {revision.id.slice(0, 8)} · {new Date(revision.createdAt).toLocaleString("zh-CN")}
+                </div>
+              </div>
+              <Button size="sm" tone="ghost" onClick={() => void rollback(revision.id)}>
+                回滚到此
+              </Button>
+            </div>
+          ))}
+          {!revisions.length ? (
+            <div className="py-8 text-center text-[11px] text-muted">还没有版本记录</div>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }

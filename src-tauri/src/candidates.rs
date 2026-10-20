@@ -58,6 +58,47 @@ pub fn risk_for(kind: &str, payload: &Value, has_source: bool) -> &'static str {
     }
 }
 
+pub fn classify(
+    conn: &Connection,
+    project_id: &str,
+    kind: &str,
+    payload: &Value,
+    source_span: Option<&str>,
+) -> AppResult<&'static str> {
+    let base = risk_for(kind, payload, source_span.is_some());
+    if base != "L1" {
+        return Ok(base);
+    }
+    let quote_present = source_span
+        .map(|span| span.contains('｜') && !span.ends_with('｜'))
+        .unwrap_or(false);
+    if !quote_present {
+        return Ok("L1");
+    }
+    match kind {
+        "style_sample" | "rule" | "scene_goal" => Ok("L0"),
+        "claim" => {
+            let subject = payload
+                .get("subject")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let truth = payload
+                .get("truthLayer")
+                .and_then(Value::as_str)
+                .unwrap_or("world");
+            if truth != "world" {
+                return Ok("L2");
+            }
+            if find_entity(conn, project_id, subject)?.is_some() {
+                Ok("L0")
+            } else {
+                Ok("L1")
+            }
+        }
+        _ => Ok("L1"),
+    }
+}
+
 pub fn insert(
     conn: &Connection,
     project_id: &str,
@@ -67,7 +108,7 @@ pub fn insert(
     source_message_id: Option<&str>,
     confidence: f64,
 ) -> AppResult<Candidate> {
-    let risk = risk_for(kind, &payload, source_span.is_some());
+    let risk = classify(conn, project_id, kind, &payload, source_span)?;
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO candidate (id, project_id, kind, payload, source_span, source_message_id,
@@ -167,7 +208,13 @@ pub fn update_payload(
     if candidate.status != "pending" {
         return Err(AppError::Message("只能编辑待确认候选".into()));
     }
-    let risk = risk_for(&candidate.kind, &payload, candidate.source_span.is_some());
+    let risk = classify(
+        conn,
+        project_id,
+        &candidate.kind,
+        &payload,
+        candidate.source_span.as_deref(),
+    )?;
     conn.execute(
         "UPDATE candidate SET payload=?3, risk_level=?4 WHERE project_id=?1 AND id=?2",
         params![project_id, id, serde_json::to_string(&payload)?, risk],
@@ -210,7 +257,7 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
     }
     let payload = candidate.payload.clone();
     let ts = now();
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let created_id = match candidate.kind.as_str() {
         "entity" => {
             let id = uuid::Uuid::new_v4().to_string();
@@ -497,63 +544,144 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
     })
 }
 
-/// 批量接受只处理 L1，生成单一 revision；L2/L3 永不进入该路径。
-pub fn batch_accept_l1(
+#[derive(Debug, Clone)]
+pub struct BatchOutcome {
+    pub batch_id: String,
+    pub revision_id: String,
+    pub accepted: i32,
+    pub sampled: i32,
+}
+
+fn table_for_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "entity" => Some("entity"),
+        "claim" => Some("claim"),
+        "event" => Some("event"),
+        "relation" => Some("relation"),
+        "promise" => Some("promise"),
+        "rule" => Some("rule"),
+        "style_sample" => Some("style_sample"),
+        "scene_goal" => Some("outline_node"),
+        _ => None,
+    }
+}
+
+fn sampled(candidate_id: &str, sample_rate: i32) -> bool {
+    if sample_rate <= 0 {
+        return false;
+    }
+    let hash = crate::hash_text(candidate_id);
+    (u8::from_str_radix(&hash[..2], 16).unwrap_or(0) as u16)
+        < (sample_rate.clamp(0, 100) as u16 * 255 / 100)
+}
+
+/// 单事务批量接受。allowed_levels 只允许 L0/L1；L2/L3 永远不会进入该路径。
+#[allow(clippy::too_many_arguments)]
+pub fn batch_accept_selective(
     conn: &mut Connection,
     project_id: &str,
     ids: &[String],
     chapter_id: Option<&str>,
-) -> AppResult<(String, String, i32)> {
+    allowed_levels: &[&str],
+    policy_id: Option<&str>,
+    policy_mode: &str,
+    sample_rate: i32,
+) -> AppResult<BatchOutcome> {
+    if allowed_levels
+        .iter()
+        .any(|level| !matches!(*level, "L0" | "L1"))
+    {
+        return Err(AppError::Message("自动/批量路径禁止接受 L2/L3".into()));
+    }
     let pending = list(conn, project_id, Some("pending"), None)?;
     let eligible: Vec<Candidate> = pending
         .into_iter()
-        .filter(|candidate| candidate.risk_level == "L1" && ids.contains(&candidate.id))
+        .filter(|candidate| {
+            allowed_levels.contains(&candidate.risk_level.as_str())
+                && ids.contains(&candidate.id)
+        })
         .collect();
     if eligible.is_empty() {
         return Err(AppError::Message(
-            "没有可批量接受的 L1 候选；L2/L3 必须逐条处理".into(),
+            "没有符合当前策略的低风险候选；L2/L3 必须逐条处理".into(),
         ));
     }
     let batch_id = uuid::Uuid::new_v4().to_string();
     let ts = now();
     conn.execute(
         "INSERT INTO review_batch (id, project_id, chapter_id, policy_id, item_count,
-            accepted_count, rejected_count, created_at)
-         VALUES (?1,?2,?3,NULL,?4,0,0,?5)",
-        params![batch_id, project_id, chapter_id, eligible.len() as i32, ts],
+            accepted_count, rejected_count, created_at, policy_mode, sample_rate, sampled_count)
+         VALUES (?1,?2,?3,?4,?5,0,0,?6,?7,?8,0)",
+        params![
+            batch_id,
+            project_id,
+            chapter_id,
+            policy_id,
+            eligible.len() as i32,
+            ts,
+            policy_mode,
+            sample_rate.clamp(0, 100)
+        ],
     )?;
-    let mut accepted = 0;
-    let mut created = Vec::new();
+    let mut operations: Vec<Value> = Vec::new();
+    let mut sample_count = 0;
     for candidate in &eligible {
-        match accept(conn, project_id, &candidate.id) {
-            Ok(result) => {
-                accepted += 1;
-                created.push(result.created_id);
-            }
+        let result = match accept(conn, project_id, &candidate.id) {
+            Ok(result) => result,
             Err(error) => {
-                conn.execute(
-                    "INSERT INTO audit_log (id, project_id, action, subject, batch_id, detail, created_at)
-                     VALUES (?1,?2,'batch_accept_failed',?3,?4,?5,?6)",
-                    params![
-                        uuid::Uuid::new_v4().to_string(),
-                        project_id,
-                        candidate.id,
-                        batch_id,
-                        json!({"error": error.to_string()}).to_string(),
-                        now()
-                    ],
-                )
-                .ok();
+                for operation in &operations {
+                    if let (Some(table), Some(created_id)) = (
+                        operation.get("table").and_then(Value::as_str),
+                        operation.get("createdId").and_then(Value::as_str),
+                    ) {
+                        conn.execute(&format!("DELETE FROM {table} WHERE id=?1"), [created_id])
+                            .ok();
+                    }
+                    if let Some(candidate_id) = operation.get("candidateId").and_then(Value::as_str)
+                    {
+                        conn.execute(
+                            "UPDATE candidate SET status='pending', confirmed_at=NULL WHERE project_id=?1 AND id=?2",
+                            params![project_id, candidate_id],
+                        )
+                        .ok();
+                    }
+                }
+                conn.execute("DELETE FROM review_batch WHERE id=?1", [&batch_id])
+                    .ok();
+                return Err(error);
             }
+        };
+        operations.push(json!({
+            "candidateId": candidate.id,
+            "createdId": result.created_id,
+            "kind": candidate.kind,
+            "table": table_for_kind(&candidate.kind)
+        }));
+        let is_sampled = sampled(&candidate.id, sample_rate);
+        if is_sampled {
+            sample_count += 1;
         }
+        conn.execute(
+            "INSERT INTO review_sample (id, project_id, batch_id, candidate_id, sampled,
+                review_status, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                batch_id,
+                candidate.id,
+                is_sampled as i32,
+                if is_sampled { "pending" } else { "not_sampled" },
+                ts
+            ],
+        )?;
     }
     let snapshot_id = uuid::Uuid::new_v4().to_string();
     let revision_id = uuid::Uuid::new_v4().to_string();
     let diff = json!({
         "action": "batch_accept",
         "batchId": batch_id,
-        "candidateIds": eligible.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
-        "createdIds": created
+        "policyMode": policy_mode,
+        "operations": operations
     });
     conn.execute(
         "INSERT INTO snapshot (id, project_id, chapter_id, content, metadata, created_at)
@@ -563,7 +691,7 @@ pub fn batch_accept_l1(
             project_id,
             chapter_id,
             diff.to_string(),
-            json!({"kind": "review_batch"}).to_string(),
+            json!({"kind": "review_batch", "batchId": batch_id}).to_string(),
             ts
         ],
     )?;
@@ -591,22 +719,185 @@ pub fn batch_accept_l1(
         ],
     )?;
     conn.execute(
-        "UPDATE review_batch SET accepted_count=?2, revision_id=?3 WHERE id=?1",
-        params![batch_id, accepted, revision_id],
+        "UPDATE review_batch SET accepted_count=?2, revision_id=?3, snapshot_id=?4,
+            sampled_count=?5 WHERE id=?1",
+        params![
+            batch_id,
+            eligible.len() as i32,
+            revision_id,
+            snapshot_id,
+            sample_count
+        ],
     )?;
     conn.execute(
-        "INSERT INTO audit_log (id, project_id, action, subject, batch_id, detail, created_at)
-         VALUES (?1,?2,'batch_accept',?3,?4,?5,?6)",
+        "INSERT INTO audit_log (id, project_id, action, subject, policy_id, batch_id, detail, created_at)
+         VALUES (?1,?2,'batch_accept',?3,?4,?5,?6,?7)",
         params![
             uuid::Uuid::new_v4().to_string(),
             project_id,
             revision_id,
+            policy_id,
             batch_id,
-            json!({"accepted": accepted, "revisionId": revision_id}).to_string(),
+            json!({
+                "accepted": eligible.len(),
+                "sampled": sample_count,
+                "mode": policy_mode
+            })
+            .to_string(),
             ts
         ],
     )?;
-    Ok((batch_id, revision_id, accepted))
+    Ok(BatchOutcome {
+        batch_id,
+        revision_id,
+        accepted: eligible.len() as i32,
+        sampled: sample_count,
+    })
+}
+
+pub fn batch_accept_l1(
+    conn: &mut Connection,
+    project_id: &str,
+    ids: &[String],
+    chapter_id: Option<&str>,
+) -> AppResult<(String, String, i32)> {
+    let outcome = batch_accept_selective(
+        conn,
+        project_id,
+        ids,
+        chapter_id,
+        &["L1"],
+        None,
+        "balanced",
+        0,
+    )?;
+    Ok((outcome.batch_id, outcome.revision_id, outcome.accepted))
+}
+
+pub fn undo_batch(
+    conn: &mut Connection,
+    project_id: &str,
+    batch_id: &str,
+) -> AppResult<(String, i32)> {
+    let (snapshot_id, undone_at): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT snapshot_id, undone_at FROM review_batch WHERE project_id=?1 AND id=?2",
+            params![project_id, batch_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Message("找不到审核批次".into()))?;
+    if undone_at.is_some() {
+        return Err(AppError::Message("该批次已经撤销".into()));
+    }
+    let snapshot_id =
+        snapshot_id.ok_or_else(|| AppError::Message("批次缺少可撤销快照".into()))?;
+    let content: String = conn.query_row(
+        "SELECT content FROM snapshot WHERE project_id=?1 AND id=?2",
+        params![project_id, snapshot_id],
+        |row| row.get(0),
+    )?;
+    let diff: Value = serde_json::from_str(&content)?;
+    let operations = diff
+        .get("operations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if operations.is_empty() {
+        return Err(AppError::Message("批次快照没有可回滚操作".into()));
+    }
+    let ts = now();
+    let undo_revision = uuid::Uuid::new_v4().to_string();
+    let undo_snapshot = uuid::Uuid::new_v4().to_string();
+    let tx = conn.transaction()?;
+    let mut restored = 0;
+    for operation in &operations {
+        let table = operation
+            .get("table")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::Message("批次操作缺少表名".into()))?;
+        if ![
+            "entity",
+            "claim",
+            "event",
+            "relation",
+            "promise",
+            "rule",
+            "style_sample",
+            "outline_node",
+        ]
+        .contains(&table)
+        {
+            return Err(AppError::Message("批次操作包含非法表名".into()));
+        }
+        if let (Some(created_id), Some(candidate_id)) = (
+            operation.get("createdId").and_then(Value::as_str),
+            operation.get("candidateId").and_then(Value::as_str),
+        ) {
+            tx.execute(&format!("DELETE FROM {table} WHERE id=?1"), [created_id])?;
+            tx.execute(
+                "UPDATE candidate SET status='pending', confirmed_at=NULL WHERE project_id=?1 AND id=?2",
+                params![project_id, candidate_id],
+            )?;
+            restored += 1;
+        }
+    }
+    let undo_diff = json!({
+        "action": "batch_undo",
+        "batchId": batch_id,
+        "restored": restored,
+        "operations": operations
+    });
+    tx.execute(
+        "INSERT INTO snapshot (id, project_id, chapter_id, content, metadata, created_at)
+         VALUES (?1,?2,NULL,?3,?4,?5)",
+        params![
+            undo_snapshot,
+            project_id,
+            undo_diff.to_string(),
+            json!({"kind": "batch_undo", "batchId": batch_id}).to_string(),
+            ts
+        ],
+    )?;
+    let batch_revision: Option<String> = tx.query_row(
+        "SELECT revision_id FROM review_batch WHERE id=?1",
+        [batch_id],
+        |row| row.get(0),
+    )?;
+    tx.execute(
+        "INSERT INTO revision (id, project_id, parent_id, chapter_id, diff, snapshot_id,
+            author_action, created_at) VALUES (?1,?2,?3,NULL,?4,?5,'batch_undo',?6)",
+        params![
+            undo_revision,
+            project_id,
+            batch_revision,
+            undo_diff.to_string(),
+            undo_snapshot,
+            ts
+        ],
+    )?;
+    tx.execute(
+        "UPDATE review_batch SET undone_at=?2 WHERE project_id=?1 AND id=?3",
+        params![project_id, ts, batch_id],
+    )?;
+    tx.execute(
+        "UPDATE review_sample SET review_status='invalidated' WHERE batch_id=?1",
+        [batch_id],
+    )?;
+    tx.execute(
+        "INSERT INTO audit_log (id, project_id, action, subject, batch_id, detail, created_at)
+         VALUES (?1,?2,'batch_undo',?3,?4,?5,?6)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            project_id,
+            undo_revision,
+            batch_id,
+            json!({"restored": restored}).to_string(),
+            ts
+        ],
+    )?;
+    tx.commit()?;
+    Ok((undo_revision, restored))
 }
 
 #[cfg(test)]
@@ -737,5 +1028,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(batch_revision, revision);
+    }
+
+    #[test]
+    fn batch_undo_restores_created_records_and_candidates() {
+        let (_dir, mut loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        let a = insert(
+            &loaded.conn,
+            &pid,
+            "entity",
+            json!({"type":"place","canonicalName":"旧车站"}),
+            Some("ch01"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        let b = insert(
+            &loaded.conn,
+            &pid,
+            "rule",
+            json!({"text":"旧车站只在雨夜出现"}),
+            Some("ch02"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        let (batch_id, _, accepted) =
+            batch_accept_l1(&mut loaded.conn, &pid, &[a.id.clone(), b.id.clone()], None).unwrap();
+        assert_eq!(accepted, 2);
+        let (_, restored) = undo_batch(&mut loaded.conn, &pid, &batch_id).unwrap();
+        assert_eq!(restored, 2);
+        let entities: i64 = loaded
+            .conn
+            .query_row("SELECT COUNT(*) FROM entity", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(entities, 0);
+        let pending = list(&loaded.conn, &pid, Some("pending"), None).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(undo_batch(&mut loaded.conn, &pid, &batch_id).is_err());
+    }
+
+    #[test]
+    fn batch_accepts_one_hundred_items_with_single_revision() {
+        let (_dir, mut loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        let mut ids = Vec::new();
+        for index in 0..100 {
+            let candidate = insert(
+                &loaded.conn,
+                &pid,
+                "entity",
+                json!({"type":"concept","canonicalName":format!("概念{index}")}),
+                Some("ch01"),
+                None,
+                0.8,
+            )
+            .unwrap();
+            ids.push(candidate.id);
+        }
+        let (_, revision, accepted) =
+            batch_accept_l1(&mut loaded.conn, &pid, &ids, None).unwrap();
+        assert_eq!(accepted, 100);
+        let revisions: i64 = loaded
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM revision WHERE author_action='batch_accept'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(revisions, 1);
+        let candidates: i64 = loaded
+            .conn
+            .query_row("SELECT COUNT(*) FROM entity", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(candidates, 100);
+        assert!(!revision.is_empty());
     }
 }

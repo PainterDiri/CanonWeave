@@ -53,6 +53,7 @@ src-tauri/.tauri/
 *.exe
 *.AppImage
 *.deb
+*.z3-trace
 
 # Environment and secrets
 .env

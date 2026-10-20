@@ -105,27 +105,70 @@ pub fn draft_accept(
     candidate_id: String,
     chapter_id: String,
 ) -> IpcResult<DraftAcceptResult> {
+    accept_draft(&state, &candidate_id, &chapter_id, true, false)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn draft_accept_variant(
+    state: State<'_, AppState>,
+    candidate_id: String,
+    chapter_id: String,
+    use_refined: bool,
+    acknowledge_fact_changes: bool,
+) -> IpcResult<DraftAcceptResult> {
+    accept_draft(
+        &state,
+        &candidate_id,
+        &chapter_id,
+        use_refined,
+        acknowledge_fact_changes,
+    )
+}
+
+fn accept_draft(
+    state: &State<'_, AppState>,
+    candidate_id: &str,
+    chapter_id: &str,
+    use_refined: bool,
+    acknowledge_fact_changes: bool,
+) -> IpcResult<DraftAcceptResult> {
     let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏".to_string())?;
     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
-    let candidate = candidates::get(&loaded.conn, &loaded.summary.id, &candidate_id)
+    let candidate = candidates::get(&loaded.conn, &loaded.summary.id, candidate_id)
         .map_err(|e| e.to_string())?;
-    if candidate.kind != "draft" {
+    if !["draft", "draft_refined"].contains(&candidate.kind.as_str()) {
         return Err("该候选不是正文草稿".into());
     }
     if candidate.status != "pending" {
         return Err("该草稿已经处理".into());
     }
+    let blocked = candidate
+        .payload
+        .get("factDelta")
+        .and_then(|value| value.get("blocked"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if use_refined && blocked && !acknowledge_fact_changes {
+        return Err("精修版本检测到硬事实变化，必须选择原文或明确确认修改".into());
+    }
     let text = candidate
         .payload
-        .get("text")
+        .get(if use_refined { "refinedText" } else { "rawText" })
+        .or_else(|| candidate.payload.get("text"))
         .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.trim().is_empty())
         .ok_or_else(|| "草稿缺少正文".to_string())?;
     let result = scenes::commit_text(
         &mut loaded.conn,
         &loaded.summary.id,
-        &chapter_id,
+        chapter_id,
         text,
-        "draft_accept",
+        if candidate.kind == "draft_refined" && acknowledge_fact_changes {
+            "refined_accept_acknowledged"
+        } else {
+            "draft_accept"
+        },
     )
     .map_err(|e| e.to_string())?;
     loaded

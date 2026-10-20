@@ -113,6 +113,20 @@ export const commands = {
 	/**  批量接受只处理 L1。创建单一 revision 记录批次；接受动作逐条仍保持证据链。 */
 	reviewBatchApply: (ids: string[], chapterId: string | null) => typedError<BatchResult, string>(__TAURI_INVOKE("review_batch_apply", { ids, chapterId })),
 	chapterTextSave: (chapterId: string, text: string) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("chapter_text_save", { chapterId, text })),
+	reviewPolicyGet: (scope: string | null, scopeId: string | null) => typedError<ReviewPolicy, string>(__TAURI_INVOKE("review_policy_get", { scope, scopeId })),
+	reviewPolicySave: (input: ReviewPolicyInput) => typedError<ReviewPolicy, string>(__TAURI_INVOKE("review_policy_save", { input })),
+	reviewPolicyApply: (candidateIds: string[] | null) => typedError<PolicyApplyResult, string>(__TAURI_INVOKE("review_policy_apply", { candidateIds })),
+	reviewBatchUndo: (batchId: string) => typedError<BatchUndoResult, string>(__TAURI_INVOKE("review_batch_undo", { batchId })),
+	reviewSampleList: () => typedError<ReviewSampleRow[], string>(__TAURI_INVOKE("review_sample_list")),
+	ruleList: () => typedError<RuleRecord[], string>(__TAURI_INVOKE("rule_list")),
+	auditRun: () => typedError<AuditRunResult, string>(__TAURI_INVOKE("audit_run")),
+	issueList: (status: string | null) => typedError<AuditIssue[], string>(__TAURI_INVOKE("issue_list", { status })),
+	issueAction: (input: IssueActionInput) => typedError<AuditIssue, string>(__TAURI_INVOKE("issue_action", { input })),
+	draftAcceptVariant: (candidateId: string, chapterId: string, useRefined: boolean, acknowledgeFactChanges: boolean) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("draft_accept_variant", { candidateId, chapterId, useRefined, acknowledgeFactChanges })),
+	revisionList: (chapterId: string | null) => typedError<RevisionRecord[], string>(__TAURI_INVOKE("revision_list", { chapterId })),
+	revisionCompare: (fromId: string, toId: string) => typedError<RevisionCompare, string>(__TAURI_INVOKE("revision_compare", { fromId, toId })),
+	revisionRollback: (revisionId: string) => typedError<DraftAcceptResult, string>(__TAURI_INVOKE("revision_rollback", { revisionId })),
+	preferenceSave: (input: PreferenceInput) => typedError<null, string>(__TAURI_INVOKE("preference_save", { input })),
 };
 
 /* Types */
@@ -120,6 +134,29 @@ export type AppInfo = {
 	name: string,
 	version: string,
 	schemaVersion: number,
+};
+
+export type AuditIssue = {
+	id: string,
+	ruleId: string,
+	ruleCode: string,
+	constraintLayer: string,
+	severity: string,
+	claimIds: string[],
+	evidenceSpans: string[],
+	explanation: string,
+	certificate: ConflictCertificate,
+	solverCore: string[],
+	riskLevel: string,
+	fingerprint: string,
+	status: string,
+	deferredUntil: string | null,
+	createdAt: string,
+};
+
+export type AuditRunResult = {
+	issuesCreated: number,
+	issues: AuditIssue[],
 };
 
 export type BatchPreview = {
@@ -136,6 +173,13 @@ export type BatchResult = {
 	revisionId: string,
 	accepted: number,
 	rejected: number,
+	sampled: number,
+};
+
+export type BatchUndoResult = {
+	batchId: string,
+	revisionId: string,
+	restored: number,
 };
 
 export type BeatOption = {
@@ -272,6 +316,16 @@ export type ChatSessionCreateInput = {
 	parentSessionId: string | null,
 };
 
+export type ConflictCertificate = {
+	ruleId: string,
+	severity: string,
+	claimIds: string[],
+	evidenceSpans: string[],
+	solverCore: string[],
+	explanation: string,
+	suggestedActions: string[],
+};
+
 export type ContextPreview = {
 	sections: ContextSection[],
 	totalChars: number,
@@ -351,6 +405,12 @@ export type ImportResult = {
 	chaptersCreated: number,
 };
 
+export type IssueActionInput = {
+	id: string,
+	action: string,
+	reason: string,
+};
+
 export type ModelConfig = {
 	baseUrl: string,
 	model: string,
@@ -410,6 +470,23 @@ export type OutlineUpdateInput = {
 export type PlotBeatsInput = {
 	sessionId: string,
 	instruction: string,
+};
+
+export type PolicyApplyResult = {
+	mode: string,
+	accepted: number,
+	sampled: number,
+	batchId: string | null,
+	revisionId: string | null,
+	message: string,
+};
+
+export type PreferenceInput = {
+	sceneId: string | null,
+	leftRunId: string,
+	rightRunId: string,
+	chosenRunId: string,
+	reason: string,
 };
 
 export type Premise = {
@@ -519,9 +596,64 @@ export type PromiseStateInput = {
 	evidence: string,
 };
 
+export type ReviewPolicy = {
+	id: string,
+	scope: string,
+	scopeId: string | null,
+	mode: string,
+	autoAcceptLevel: string,
+	sampleRate: number,
+	lockHard: boolean,
+	updatedAt: string,
+};
+
+export type ReviewPolicyInput = {
+	scope: string,
+	scopeId: string | null,
+	mode: string,
+};
+
 export type ReviewQueue = {
 	candidates: Candidate[],
 	counts: CandidateCounts,
+};
+
+export type ReviewSampleRow = {
+	id: string,
+	batchId: string,
+	candidateId: string,
+	sampled: boolean,
+	reviewStatus: string,
+	createdAt: string,
+};
+
+export type RevisionCompare = {
+	fromText: string,
+	toText: string,
+	fromChars: number,
+	toChars: number,
+	preview: string,
+};
+
+export type RevisionRecord = {
+	id: string,
+	parentId: string | null,
+	chapterId: string | null,
+	authorAction: string,
+	diff: any,
+	snapshotId: string | null,
+	createdAt: string,
+};
+
+export type RuleRecord = {
+	id: string,
+	code: string,
+	constraintLayer: string,
+	severity: string,
+	predicate: any,
+	exceptionScope: any,
+	description: string,
+	enabled: boolean,
 };
 
 export type SceneInput = {
