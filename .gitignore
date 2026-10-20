@@ -2,7 +2,6 @@
 .DS_Store
 .AppleDouble
 .LSOverride
-Icon?
 ._*
 
 # Editors and IDEs
@@ -73,7 +72,17 @@ secrets/
 *.db-wal
 *.sqlite
 *.sqlite3
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 data/local/
+
+# Local CanonWeave story projects
+/project.json
+/imports/
+/exports/
+/backups/
+/story-project/
 
 # Logs and temporary files
 logs/
@@ -88,3 +97,7 @@ temp/
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Internal development notes
+/叙事织网_开发文档.md
+/开发进度.md
