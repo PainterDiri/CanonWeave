@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f3efe6;
+  --color-paper-raised: #fbf8f1;
+  --color-paper-deep: #e9e2d4;
+  --color-ink: #23241f;
+  --color-ink-soft: #55564f;
+  --color-muted: #767368;
+  --color-line: #ded7c8;
+  --color-line-strong: #c9c0ae;
+  --color-teal: #114b45;
+  --color-teal-deep: #0b3531;
+  --color-teal-soft: #dcebe6;
+  --color-coral: #d9604a;
+  --color-coral-soft: #f6e2dc;
+  --color-amber: #b8862e;
+  --color-amber-soft: #f4ead2;
+  --font-display: "Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  --font-body: "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", system-ui, sans-serif;
+}
+
+:root {
+  color: var(--color-ink);
+  background: var(--color-paper);
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% -10%, rgba(255, 255, 255, 0.85), transparent 38%),
+    radial-gradient(circle at 92% 108%, rgba(17, 75, 69, 0.06), transparent 45%),
+    var(--color-paper);
+}
+
+@layer base {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  background: rgba(17, 75, 69, 0.16);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(110, 105, 92, 0.24);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.paper-card {
+  background: color-mix(in srgb, var(--color-paper-raised) 92%, transparent);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 8px 24px rgba(61, 50, 35, 0.04);
+}
+
+.hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-line) 12%, var(--color-line) 88%, transparent);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.fade-in {
+  animation: fade-in 280ms ease-out both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashed-rule {
+  border-top: 1px dashed var(--color-line-strong);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid rgba(17, 75, 69, 0.55);
+  outline-offset: 2px;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.window-drag {
+  -webkit-app-region: drag;
+}

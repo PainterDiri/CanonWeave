@@ -1,0 +1,47 @@
+[package]
+name = "canonweave"
+version = "0.1.0"
+description = "CanonWeave - Keep every story whole."
+authors = ["CanonWeave"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "canonweave_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rusqlite = { version = "0.37", features = ["bundled", "chrono", "serde_json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"
+unicode-segmentation = "1"
+jieba-rs = "0.7"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
+futures-util = "0.3"
+specta = { version = "2.0.0-rc.25", features = ["derive", "serde_json"] }
+specta-typescript = "0.0.12"
+tauri-specta = { version = "2.0.0-rc.25", features = ["derive", "typescript"] }
+walkdir = "2"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+quick-xml = "0.42"
+encoding_rs = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
