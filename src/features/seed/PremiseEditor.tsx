@@ -16,6 +16,10 @@ const empty: Form = {
   emotionalPromise: "",
   tone: "",
   coreConflict: "",
+  dramaticQuestion: "",
+  antagonisticForce: "",
+  worldRule: "",
+  endingDirection: "",
   protagonistDesire: "",
   flaw: "",
   secret: "",
@@ -38,6 +42,10 @@ function toForm(premise: Premise): Form {
     emotionalPromise: premise.emotionalPromise,
     tone: premise.tone,
     coreConflict: premise.coreConflict,
+    dramaticQuestion: premise.dramaticQuestion,
+    antagonisticForce: premise.antagonisticForce,
+    worldRule: premise.worldRule,
+    endingDirection: premise.endingDirection,
     protagonistDesire: premise.protagonistDesire,
     flaw: premise.flaw,
     secret: premise.secret,
@@ -149,6 +157,36 @@ export function PremiseEditor({
             onChange={(e) => set("coreConflict", e.target.value)}
             placeholder="谁想要什么、什么在阻止、代价是什么"
           />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="核心戏剧问题" hint="全书用一个代价选择回答">
+            <Textarea
+              rows={2}
+              value={form.dramaticQuestion}
+              onChange={(e) => set("dramaticQuestion", e.target.value)}
+            />
+          </Field>
+          <Field label="结构性阻力" hint="谁或什么在阻止，靠什么阻止">
+            <Textarea
+              rows={2}
+              value={form.antagonisticForce}
+              onChange={(e) => set("antagonisticForce", e.target.value)}
+            />
+          </Field>
+          <Field label="持续制造代价的世界规则">
+            <Textarea
+              rows={2}
+              value={form.worldRule}
+              onChange={(e) => set("worldRule", e.target.value)}
+            />
+          </Field>
+          <Field label="终局改变什么" hint="世界 / 关系 / 自我认知">
+            <Textarea
+              rows={2}
+              value={form.endingDirection}
+              onChange={(e) => set("endingDirection", e.target.value)}
+            />
+          </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="类型">

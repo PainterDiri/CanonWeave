@@ -3,16 +3,16 @@ use rusqlite::{params, Connection};
 use crate::{
     domain::{ContextPreview, ContextSection, SceneRecord},
     error::AppResult,
-    retrieval, scenes, seed, style,
+    blueprint, retrieval, scenes, seed, style,
 };
 
 const LAYER_BUDGETS: &[(&str, &str, i32)] = &[
     ("L0", "HARD CANON", 12),
-    ("L1", "ACTIVE STATE", 17),
+    ("L1", "ACTIVE STATE", 25),
     ("L2", "POV KNOWLEDGE", 6),
     ("L3", "WIKI INDEX", 4),
     ("L4", "DUE PROMISES", 9),
-    ("L5", "EVIDENCE EXCERPTS", 33),
+    ("L5", "EVIDENCE EXCERPTS", 25),
     ("L6", "VOICE & STYLE", 14),
     ("L7", "TASK CONTRACT", 5),
     ("L8", "FINAL HARD CONSTRAINTS", 10),
@@ -288,8 +288,10 @@ pub fn compile(
                         )
                     })
                     .unwrap_or_else(|| "种子卡尚未确认。".into());
+                let blueprint_text =
+                    blueprint::chapter_logic_context(conn, project_id, chapter.number)?;
                 format!(
-                    "{premise_text}\n当前章节：第 {} 章《{}》\n本场目标：{}\n本场冲突：{}",
+                    "{premise_text}\n\n本章叙事契约：\n{blueprint_text}\n\n当前章节：第 {} 章《{}》\n本场目标：{}\n本场冲突：{}",
                     chapter.number, chapter.title, scene.goal, scene.conflict
                 )
             }

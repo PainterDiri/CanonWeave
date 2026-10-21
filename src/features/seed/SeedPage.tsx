@@ -8,14 +8,16 @@ import {
   Pencil,
   Sparkles,
   Wand2,
+  Compass,
 } from "lucide-react";
 import { Badge, Button, SectionTitle, Textarea } from "@/components/ui";
 import { ipc, type Premise } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
+import { BlueprintPanel } from "./BlueprintPanel";
 import { OutlinePanel } from "./OutlinePanel";
 import { PremiseEditor } from "./PremiseEditor";
 
-type Tab = "seed" | "outline";
+type Tab = "seed" | "blueprint" | "outline";
 
 const samples = [
   "一个只能在雨夜出现的旧车站，和一张写着明天日期的车票。",
@@ -107,7 +109,8 @@ export function SeedPage() {
       <div className="mb-5 flex items-center gap-1 border-b border-line">
         {[
           { key: "seed" as const, label: "种子卡", icon: Sparkles },
-          { key: "outline" as const, label: "卷章规划", icon: Wand2 },
+          { key: "blueprint" as const, label: "叙事蓝本", icon: Compass },
+          { key: "outline" as const, label: "卷章编排", icon: Wand2 },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -142,7 +145,7 @@ export function SeedPage() {
 
       {!loading && tab === "seed" ? (
         <div className="space-y-5">
-          {active ? <ConfirmedCard premise={active} onEdit={() => { setEditing(active); setEditorOpen(true); }} onOutline={() => setTab("outline")} /> : null}
+          {active ? <ConfirmedCard premise={active} onEdit={() => { setEditing(active); setEditorOpen(true); }} onOutline={() => setTab("blueprint")} /> : null}
 
           {!active ? (
             <section className="paper-card relative overflow-hidden p-7">
@@ -254,6 +257,14 @@ export function SeedPage() {
         </div>
       ) : null}
 
+      {!loading && tab === "blueprint" ? (
+        <BlueprintPanel
+          hasPremise={Boolean(active)}
+          onNeedPremise={() => setTab("seed")}
+          onReady={() => setTab("outline")}
+        />
+      ) : null}
+
       {!loading && tab === "outline" ? (
         <OutlinePanel hasPremise={Boolean(active)} onSwitchToSeed={() => setTab("seed")} />
       ) : null}
@@ -315,6 +326,24 @@ function DirectionCard({
             <span className="text-ink-soft">{premise.emotionalPromise}</span>
           </div>
         ) : null}
+        {premise.dramaticQuestion ? (
+          <div>
+            <span className="text-muted">戏剧问题 · </span>
+            <span className="text-ink-soft">{premise.dramaticQuestion}</span>
+          </div>
+        ) : null}
+        {premise.antagonisticForce ? (
+          <div>
+            <span className="text-muted">结构性阻力 · </span>
+            <span className="text-ink-soft">{premise.antagonisticForce}</span>
+          </div>
+        ) : null}
+        {premise.worldRule ? (
+          <div>
+            <span className="text-muted">世界规则 · </span>
+            <span className="text-ink-soft">{premise.worldRule}</span>
+          </div>
+        ) : null}
       </div>
       <div className="mt-auto pt-5">
         <div className="dashed-rule mb-3" />
@@ -359,7 +388,7 @@ function ConfirmedCard({
             编辑种子卡
           </Button>
           <Button size="sm" tone="primary" onClick={onOutline} icon={<ArrowRight size={12} />}>
-            规划卷章
+            建立叙事蓝本
           </Button>
         </div>
       </div>
@@ -375,6 +404,24 @@ function ConfirmedCard({
             <div className="mt-1.5 text-[12px] leading-5 text-ink-soft">{value}</div>
           </div>
         ))}
+      </div>
+      <div className="grid grid-cols-2 gap-5 border-t border-line px-6 py-4">
+        <div>
+          <div className="text-[10px] tracking-wide text-muted">核心戏剧问题</div>
+          <div className="mt-1.5 text-[11.5px] leading-5 text-ink-soft">{premise.dramaticQuestion || "待补全"}</div>
+        </div>
+        <div>
+          <div className="text-[10px] tracking-wide text-muted">结构性阻力</div>
+          <div className="mt-1.5 text-[11.5px] leading-5 text-ink-soft">{premise.antagonisticForce || "待补全"}</div>
+        </div>
+        <div>
+          <div className="text-[10px] tracking-wide text-muted">持续制造代价的世界规则</div>
+          <div className="mt-1.5 text-[11.5px] leading-5 text-ink-soft">{premise.worldRule || "待补全"}</div>
+        </div>
+        <div>
+          <div className="text-[10px] tracking-wide text-muted">终局改变</div>
+          <div className="mt-1.5 text-[11.5px] leading-5 text-ink-soft">{premise.endingDirection || "待补全"}</div>
+        </div>
       </div>
       {(premise.worldHook.length > 0 || premise.taboo.length > 0) && (
         <div className="grid grid-cols-2 gap-5 border-t border-line px-6 py-4">

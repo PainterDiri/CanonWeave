@@ -34,6 +34,10 @@ const premise = {
   emotionalPromise: "层层收紧的怀疑，与迟来的理解",
   tone: "潮湿、克制、略带压迫",
   coreConflict: "林澈想证明父亲的死并非意外，而母亲坚持让葬礼按计划结束。",
+  dramaticQuestion: "林澈能否在不抹掉父亲真实死因的情况下找到寄信者？",
+  antagonisticForce: "守夜人通过旧车站规则封锁所有能证明死亡的记录。",
+  worldRule: "未来信每提前出现一次，就会从寄信者的记忆里消失一天。",
+  endingDirection: "林澈接受父亲已死，但改变了家族对死亡的处理方式。",
   protagonistDesire: "找到信件的寄出者",
   flaw: "只相信可核对的证据",
   secret: "他曾在三年前伪造过父亲的一封信",
@@ -99,6 +103,9 @@ const chapter = (n: number, title: string, status = "candidate") => ({
   conflict: "母亲要求立刻结束葬礼，守夜人拒绝交出钥匙。",
   turn: "信的日期又向前跳了一天。",
   payoff: "回收旧钥匙；新增车站的检票口。",
+  logicNodeIds: ["n1"],
+  presentationMode: "prose",
+  narrativeFunction: n === 1 ? "inciting" : "complication",
   status,
   branchId: null,
   source: "ai",
@@ -129,6 +136,89 @@ async function installMock(page: import("@playwright/test").Page) {
               return [premise];
             case "premise_active":
               return premise;
+            case "blueprint_update": {
+              const input = args.input;
+              const edges = input.edges.map((edge: any, index: number) => ({
+                ...edge,
+                id: edge.id || `edge-new-${index}`,
+              }));
+              return {
+                blueprint: {
+                  id: input.id,
+                  premiseId: "p1",
+                  title: input.title,
+                  medium: input.medium,
+                  structureStrategy: input.structureStrategy,
+                  targetUnits: input.targetUnits,
+                  coreDramaticQuestion: input.coreDramaticQuestion,
+                  narrativePromise: input.narrativePromise,
+                  openingState: input.openingState,
+                  endingState: input.endingState,
+                  themeQuestion: input.themeQuestion,
+                  status: "candidate",
+                  completeness: edges.length > 0 ? 92 : 70,
+                  version: 2,
+                  createdAt: "2026-10-20T08:05:00Z",
+                  updatedAt: "2026-10-20T08:05:00Z",
+                },
+                elements: input.elements,
+                timeline: input.timeline,
+                threads: input.threads,
+                nodes: input.nodes,
+                edges,
+                presentations: input.presentations,
+                diagnostics: edges.length > 0 ? [] : [{
+                  code: "graph.disconnected",
+                  severity: "error",
+                  message: "因果链存在断点，无法从起点完整推到终局",
+                  path: "edges",
+                }],
+              };
+            }
+            case "blueprint_current":
+            case "blueprint_candidate":
+              return {
+                blueprint: {
+                  id: "bp1",
+                  premiseId: "p1",
+                  title: "雨夜来信",
+                  medium: "novel",
+                  structureStrategy: "adaptive",
+                  targetUnits: null,
+                  coreDramaticQuestion: "林澈能否在不改写父亲死亡的前提下找到寄信者？",
+                  narrativePromise: "每次接近真相都会让一封未来的信提前抵达。",
+                  openingState: "所有人相信父亲已死。",
+                  endingState: "林澈接受死亡不可逆，但改变了自己与父亲的关系。",
+                  themeQuestion: "人是否能通过记忆改变已经发生的事？",
+                  status: "candidate",
+                  completeness: 92,
+                  version: 1,
+                  createdAt: "2026-10-20T08:05:00Z",
+                  updatedAt: "2026-10-20T08:05:00Z",
+                },
+                elements: [
+                  { id: "e1", kind: "character", name: "林澈", role: "主角", summary: "在葬礼上收到未来来信", externalGoal: "找到寄信者", internalNeed: "接受父亲已经死亡", fear: "再次失去家人", flaw: "把控制当成爱", leverage: "能辨认父亲的字迹", constraints: [], secret: "曾改过父亲遗书", relations: [], metadata: {}, status: "confirmed", sortOrder: 0 },
+                  { id: "e2", kind: "character", name: "守夜人", role: "对手", summary: "知道旧车站规则的人", externalGoal: "维持车站", internalNeed: "赎罪", fear: "时间规则崩塌", flaw: "隐瞒", leverage: "控制车站", constraints: [], secret: "父亲留下规则", relations: [], metadata: {}, status: "confirmed", sortOrder: 1 },
+                  { id: "e3", kind: "world_rule", name: "未来信", role: "世界规则", summary: "信只能在葬礼后出现", externalGoal: "", internalNeed: "", fear: "", flaw: "", leverage: "", constraints: [], secret: "", relations: [], metadata: {}, status: "confirmed", sortOrder: 2 },
+                ],
+                timeline: [
+                  { id: "t1", orderNo: 1, title: "父亲进入车站", storyTime: "十年前", cause: "寻找失踪者", participants: ["父亲"], outcome: "父亲失踪", consequence: "林澈开始守夜", revealAt: "开篇" },
+                  { id: "t2", orderNo: 2, title: "未来信寄出", storyTime: "现在", cause: "旧车站重启", participants: ["父亲", "林澈"], outcome: "林澈收到信", consequence: "葬礼被打断", revealAt: "第一章" },
+                  { id: "t3", orderNo: 3, title: "守夜人现身", storyTime: "现在", cause: "信被打开", participants: ["守夜人", "林澈"], outcome: "规则暴露", consequence: "林澈必须做出选择", revealAt: "第一卷末" },
+                ],
+                threads: [
+                  { id: "th1", orderNo: 1, kind: "main", title: "未来信主线", dramaticQuestion: "谁在寄信？", openingState: "葬礼", targetState: "真相揭示", stakes: "林澈的家庭记忆", status: "confirmed" },
+                ],
+                nodes: [
+                  { id: "n1", threadId: "th1", threadTitle: "未来信主线", orderNo: 1, kind: "inciting", title: "未来信出现", cause: "父亲葬礼", choice: "林澈打开信", cost: "葬礼被打断", outcome: "信件日期暴露", stateChange: "家族秘密浮出", knowledgeChange: "林澈知道父亲留下规则", participants: ["林澈"], location: "殡仪馆", storyTime: "现在", status: "confirmed" },
+                  { id: "n2", threadId: "th1", threadTitle: "未来信主线", orderNo: 2, kind: "reveal", title: "车站规则", cause: "林澈打开信", choice: "前往旧车站", cost: "失去父亲遗物", outcome: "守夜人现身", stateChange: "林澈被卷入", knowledgeChange: "守夜人知道寄信者", participants: ["林澈", "守夜人"], location: "旧车站", storyTime: "当夜", status: "confirmed" },
+                ],
+                edges: [
+                  { id: "edge1", fromNodeId: "n1", fromTitle: "未来信出现", toNodeId: "n2", toTitle: "车站规则", relation: "导致", condition: "林澈未交出信", status: "confirmed" },
+                ],
+                presentations: [],
+                diagnostics: [],
+              };
             case "outline_list":
               return [
                 {
@@ -141,6 +231,9 @@ async function installMock(page: import("@playwright/test").Page) {
                   conflict: "家族要求尽快结束葬礼",
                   turn: "信件来自尚未发生的下周",
                   payoff: "打开旧车站",
+                  logicNodeIds: [],
+                  presentationMode: "prose",
+                  narrativeFunction: "",
                   status: "confirmed",
                   branchId: null,
                   source: "ai",
@@ -158,6 +251,9 @@ async function installMock(page: import("@playwright/test").Page) {
                   conflict: "母亲和守夜人各自隐瞒真相",
                   turn: "父亲留下的是一套未完成的时间规则",
                   payoff: "把选择交给林澈",
+                  logicNodeIds: [],
+                  presentationMode: "prose",
+                  narrativeFunction: "",
                   status: "candidate",
                   branchId: null,
                   source: "ai",
@@ -705,7 +801,23 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.screenshot({ path: path.join("test-results", "chat.png") });
 
   await page.getByRole("button", { name: "灵感与卷章", exact: true }).click();
-  await page.getByRole("button", { name: "卷章规划", exact: true }).click();
+  await page.getByRole("button", { name: "叙事蓝本", exact: true }).click();
+  await expect(page.getByText("叙事逻辑链")).toBeVisible();
+  await page.getByRole("button", { name: "编辑 林澈", exact: true }).click();
+  await expect(page.getByText("编辑人物 · 林澈")).toBeVisible();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "新增因果边", exact: true }).click();
+  await page.getByRole("button", { name: "逻辑节点 #2 车站规则", exact: true }).click();
+  await page.getByRole("button", { name: "逻辑节点 #1 未来信出现", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "新增因果边", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "保存并重新诊断", exact: true }).click();
+  await expect(page.getByText("2 条因果边", { exact: false })).toBeVisible();
+  await page.getByTestId("logic-edge-edge-new-1").click();
+  await page.getByRole("button", { name: "删除此边", exact: true }).click();
+  await expect(page.getByText("1 条因果边", { exact: false })).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: path.join("test-results", "blueprint.png") });
+  await page.getByRole("button", { name: "卷章编排", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "outline.png") });
 

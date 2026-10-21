@@ -20,6 +20,10 @@ fn premise_from_row(row: &Row<'_>) -> rusqlite::Result<Premise> {
         emotional_promise: row.get(5)?,
         tone: row.get(6)?,
         core_conflict: row.get(7)?,
+        dramatic_question: row.get(25)?,
+        antagonistic_force: row.get(26)?,
+        world_rule: row.get(27)?,
+        ending_direction: row.get(28)?,
         protagonist_desire: row.get(8)?,
         flaw: row.get(9)?,
         secret: row.get(10)?,
@@ -43,7 +47,8 @@ fn premise_from_row(row: &Row<'_>) -> rusqlite::Result<Premise> {
 const SELECT: &str = "SELECT id, logline, genre, subgenre, theme, emotional_promise, tone,
     core_conflict, protagonist_desire, flaw, secret, world_hook, pov, person, tense,
     target_length, update_rhythm, ending_intent, taboo, field_sources, status,
-    source_message_id, version, created_at, updated_at FROM premise";
+    source_message_id, version, created_at, updated_at, dramatic_question,
+    antagonistic_force, world_rule, ending_direction FROM premise";
 
 pub fn list(conn: &Connection, project_id: &str) -> AppResult<Vec<Premise>> {
     let mut stmt = conn.prepare(&format!(
@@ -126,15 +131,20 @@ pub fn insert_directions(
             "coreConflict": "inferred",
             "genre": "inferred",
             "theme": "inferred",
-            "tone": "inferred"
+            "tone": "inferred",
+            "dramaticQuestion": "inferred",
+            "antagonisticForce": "inferred",
+            "worldRule": "inferred",
+            "endingDirection": "inferred"
         });
         tx.execute(
             "INSERT INTO premise (id, project_id, logline, genre, subgenre, theme, emotional_promise,
                 tone, core_conflict, protagonist_desire, flaw, secret, world_hook, pov, person, tense,
                 target_length, update_rhythm, ending_intent, taboo, status, source_message_id,
-                field_sources, version, created_at, updated_at)
+                field_sources, version, created_at, updated_at, dramatic_question,
+                antagonistic_force, world_rule, ending_direction)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                ?17, ?18, ?19, ?20, 'candidate', ?21, ?22, 1, ?23, ?23)",
+                ?17, ?18, ?19, ?20, 'candidate', ?21, ?22, 1, ?23, ?23, ?24, ?25, ?26, ?27)",
             params![
                 id,
                 project_id,
@@ -158,7 +168,11 @@ pub fn insert_directions(
                 array("taboo"),
                 source_message_id,
                 fields.to_string(),
-                ts
+                ts,
+                value("dramatic_question"),
+                value("antagonistic_force"),
+                value("world_rule"),
+                value("ending_direction")
             ],
         )?;
         ids.push(id);
@@ -197,7 +211,8 @@ pub fn update(
         "UPDATE premise SET logline=?3, genre=?4, subgenre=?5, theme=?6, emotional_promise=?7,
             tone=?8, core_conflict=?9, protagonist_desire=?10, flaw=?11, secret=?12, world_hook=?13,
             pov=?14, person=?15, tense=?16, target_length=?17, update_rhythm=?18, ending_intent=?19,
-            taboo=?20, field_sources=?21, version=version+1, updated_at=?22
+            taboo=?20, field_sources=?21, version=version+1, updated_at=?22,
+            dramatic_question=?23, antagonistic_force=?24, world_rule=?25, ending_direction=?26
          WHERE project_id=?1 AND id=?2",
         params![
             project_id,
@@ -221,7 +236,11 @@ pub fn update(
             input.ending_intent.trim(),
             serde_json::to_string(&input.taboo)?,
             Value::Object(sources).to_string(),
-            ts
+            ts,
+            input.dramatic_question.trim(),
+            input.antagonistic_force.trim(),
+            input.world_rule.trim(),
+            input.ending_direction.trim()
         ],
     )?;
     get(conn, project_id, id)
@@ -299,11 +318,20 @@ mod tests {
         let cards = insert_directions(
             &mut loaded.conn,
             &loaded.summary.id,
-            &[json!({"logline":"A", "core_conflict":"C"})],
+            &[json!({
+                "logline":"A",
+                "core_conflict":"C",
+                "dramatic_question":"A 能否在失去 B 前救回 C？",
+                "antagonistic_force":"守门人通过规则阻止 A",
+                "world_rule":"每次开门都会抹去一段记忆",
+                "ending_direction":"A 接受失去记忆"
+            })],
             None,
         )
         .unwrap();
         let card = &cards[0];
+        assert_eq!(card.dramatic_question, "A 能否在失去 B 前救回 C？");
+        assert_eq!(card.antagonistic_force, "守门人通过规则阻止 A");
         let input = PremiseInput {
             logline: "新的句子".into(),
             genre: "悬疑".into(),
@@ -312,6 +340,10 @@ mod tests {
             emotional_promise: String::new(),
             tone: String::new(),
             core_conflict: "新的冲突".into(),
+            dramatic_question: String::new(),
+            antagonistic_force: String::new(),
+            world_rule: String::new(),
+            ending_direction: String::new(),
             protagonist_desire: String::new(),
             flaw: String::new(),
             secret: String::new(),

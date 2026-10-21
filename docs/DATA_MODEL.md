@@ -3,7 +3,7 @@
 ## 数据库边界
 
 - SQLite 文件：`<项目目录>/narrative.sqlite`
-- 当前 schema：v6
+- 当前 schema：v7
 - 迁移目录：`src-tauri/migrations/`
 - 迁移入口：`src-tauri/src/db/mod.rs`
 - 所有项目数据、索引、版本和派生视图都在项目目录内。
@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | 项目与结构 | `project`、`premise`、`outline_node`、`story_structure`、`chapter`、`scene` | 作者确认的项目结构和正文 |
 | 权威故事事实 | `entity`、`claim`、`event`、`relation`、`promise`、`arc_beat` | 带来源和状态的叙事事实 |
+| 叙事蓝本 | `narrative_blueprint`、`narrative_element`、`narrative_timeline_event`、`narrative_thread`、`narrative_logic_node`、`narrative_logic_edge`、`narrative_presentation` | 作者确认的规划权威层；章节和任务从逻辑链派生 |
 | 人物与知识 | `character_core`、`knowledge_domain`、`knowledge_entry` | 人物核心、环境、物品和自定义知识 |
 | 候选与审核 | `candidate`、`issue`、`rule`、`review_policy`、`review_batch` | 未确认内容、冲突和审核策略 |
 | 表达控制 | `style_profile`、`style_sample`、`character_voice_sample`、`character_voice_profile`、`motif`、`preference` | 文笔、人物声音和作者偏好 |
@@ -35,8 +36,12 @@
 - `claim.truth_layer` 区分 `world`、`belief`、`utterance`、`narrative`、`planned`。
 - 不同真值层不能直接按同一世界事实判冲突。
 
-### 卷章结构
+### 叙事蓝本与卷章结构
 
+- 叙事蓝本先于卷章存在，保存核心戏剧问题、开局长板、终局状态、人物/势力/世界规则、时间线、叙事线和因果链。
+- `narrative_logic_node` 是规划权威节点；章节、任务和游戏演出都从逻辑节点派生。
+- `outline_node.logic_node_ids` 记录章节承接的逻辑节点，`presentation_mode` 记录呈现媒介。
+- 小说可选用 `adaptive` 策略，由逻辑链估算篇幅；游戏或有硬性篇幅要求时使用 `fixed`。
 - 分卷模式下，卷是 `outline_node(level='volume')`。
 - 章节通过 `outline_node.parent_id` 指向卷。
 - 章节确认后，`chapter.volume_id` 指向卷节点。
@@ -67,6 +72,7 @@
 | v4 | 分支感知事实、社区标题、全书洞察 |
 | v5 | Wiki 来源片段、人物声音样本与质心、伏笔证据拆分 |
 | v6 | 章节卷归属、作品结构、知识域、知识条目 |
+| v7 | 叙事蓝本、人物/势力/世界规则档案、时间线、叙事逻辑节点与因果边、游戏呈现契约 |
 
 旧项目打开时：
 

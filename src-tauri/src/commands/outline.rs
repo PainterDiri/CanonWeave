@@ -3,13 +3,16 @@ use tauri::State;
 
 use crate::{
     domain::{
-        OutlineGenerateInput, OutlineNode, OutlineStatus, OutlineUpdateInput, VolumePlanInput,
+        NarrativeBlueprintView, NarrativeLogicNode, OutlineGenerateInput, OutlineNode,
+        OutlineStatus, OutlineUpdateInput, VolumePlanInput,
     },
     error::IpcResult,
     knowledge,
+    blueprint,
     llm::{
-        outline_chapter_system_prompt, outline_chapter_user_prompt, outline_volume_system_prompt,
-        outline_volume_user_prompt, parse_json_loose, ChatTurn, LlmClient,
+        outline_adaptive_system_prompt, outline_adaptive_user_prompt, outline_chapter_system_prompt,
+        outline_chapter_user_prompt, outline_volume_system_prompt, outline_volume_user_prompt,
+        parse_json_loose, ChatTurn, LlmClient,
     },
     outline::{self, OutlineChapterDraft, OutlinePlanDraft, OutlineVolumeDraft},
     seed,
@@ -37,6 +40,11 @@ struct NormalizedPlan {
 
 fn normalize_plan(input: &OutlineGenerateInput) -> Result<NormalizedPlan, String> {
     match input.mode.as_str() {
+        "adaptive" => Ok(NormalizedPlan {
+            mode: "adaptive".into(),
+            total_chapters: 0,
+            volumes: vec![],
+        }),
         "chapters" => {
             let total = input.total_chapters.unwrap_or(0);
             if !(1..=MAX_CHAPTERS).contains(&total) {
@@ -99,6 +107,102 @@ fn value_string(value: &Value, key: &str) -> String {
         .unwrap_or_default()
         .trim()
         .to_string()
+}
+
+fn value_string_list(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect(),
+        Some(Value::String(raw)) => raw
+            .split([',', '，', '、'])
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn resolve_logic_marker<'a>(
+    marker: &str,
+    nodes: &'a [NarrativeLogicNode],
+) -> Option<&'a NarrativeLogicNode> {
+    let marker = marker
+        .trim()
+        .trim_start_matches('#')
+        .trim_start_matches('第')
+        .trim_end_matches('章')
+        .trim();
+    let numeric = marker.parse::<i32>().ok();
+    nodes.iter().find(|node| {
+        node.id == marker
+            || node.title == marker
+            || numeric == Some(node.order_no)
+            || marker.starts_with(&format!("{} ", node.order_no))
+            || marker.starts_with(&format!("{}.", node.order_no))
+            || marker.starts_with(&format!("{}、", node.order_no))
+            || (!node.title.is_empty() && marker.contains(&node.title))
+    })
+}
+
+fn bind_logic_nodes(
+    plan: &mut OutlinePlanDraft,
+    view: &NarrativeBlueprintView,
+) -> Result<(), String> {
+    for chapter in &mut plan.chapters {
+        let mut resolved = Vec::new();
+        for marker in &chapter.logic_node_ids {
+            let Some(node) = resolve_logic_marker(marker, &view.nodes) else {
+                return Err(format!(
+                    "第 {} 章引用了不存在的逻辑节点“{}”。请重新生成章节编排。",
+                    chapter.number, marker
+                ));
+            };
+            if !resolved.contains(&node.id) {
+                resolved.push(node.id.clone());
+            }
+        }
+        if resolved.is_empty() {
+            return Err(format!(
+                "第 {} 章没有承接任何逻辑节点。章节必须从已确认因果链派生，请重新生成。",
+                chapter.number
+            ));
+        }
+        let presentations: Vec<_> = view
+            .presentations
+            .iter()
+            .filter(|item| resolved.contains(&item.logic_node_id))
+            .collect();
+        if chapter.presentation_mode.trim().is_empty() {
+            chapter.presentation_mode = if view.blueprint.medium == "game" {
+                if presentations.len() > 1 {
+                    "mixed".into()
+                } else {
+                    presentations
+                        .first()
+                        .map(|item| item.mode.clone())
+                        .unwrap_or_else(|| "mixed".into())
+                }
+            } else {
+                "prose".into()
+            };
+        }
+        if chapter.narrative_function.trim().is_empty() {
+            chapter.narrative_function = resolved
+                .iter()
+                .filter_map(|id| view.nodes.iter().find(|node| &node.id == id))
+                .map(|node| node.kind.clone())
+                .collect::<Vec<_>>()
+                .join(" / ");
+        }
+        chapter.logic_node_ids = resolved;
+    }
+    Ok(())
 }
 
 async fn generate_volume_headers(
@@ -219,6 +323,9 @@ async fn generate_chapter_batch(
                 conflict: value_string(&row, "conflict"),
                 turn: value_string(&row, "turn"),
                 payoff: value_string(&row, "payoff"),
+                logic_node_ids: value_string_list(&row, "logicNodeIds"),
+                presentation_mode: value_string(&row, "presentationMode"),
+                narrative_function: value_string(&row, "narrativeFunction"),
             }
         })
         .collect())
@@ -370,7 +477,7 @@ pub async fn outline_generate(
 ) -> IpcResult<Vec<OutlineNode>> {
     let normalized = normalize_plan(&input).map_err(|e| e.to_string())?;
     let client = super::seed::require_client(&state).map_err(|e| e.to_string())?;
-    let (project_id, premise) = {
+    let (project_id, premise, blueprint_context) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let premise = seed::active(&loaded.conn, &loaded.summary.id)
@@ -382,11 +489,90 @@ pub async fn outline_generate(
         if !knowledge_context.is_empty() {
             premise["knowledgeBase"] = Value::String(knowledge_context);
         }
-        (loaded.summary.id.clone(), premise)
+        let blueprint_context = if blueprint::current(&loaded.conn, &loaded.summary.id)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            blueprint::logic_context(&loaded.conn, &loaded.summary.id, 120)
+                .map_err(|e| e.to_string())?
+        } else {
+            String::new()
+        };
+        (loaded.summary.id.clone(), premise, blueprint_context)
     };
-    let plan = generate_plan(&client, &premise, normalized).await?;
+    let normalized = if normalized.mode == "adaptive" {
+        if blueprint_context.is_empty() {
+            return Err("自适应编排需要先确认叙事蓝本".into());
+        }
+        let raw = client
+            .complete(
+                &[
+                    ChatTurn::system(outline_adaptive_system_prompt()),
+                    ChatTurn::user(outline_adaptive_user_prompt(
+                        &premise,
+                        &blueprint_context,
+                    )),
+                ],
+                Some(client.max_tokens.max(5000)),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        let value: Value = parse_json_loose(&raw)
+            .map_err(|error| format!("自适应结构解析失败：{error}"))?;
+        let total = value
+            .get("totalChapters")
+            .and_then(Value::as_i64)
+            .unwrap_or(0) as i32;
+        if !(24..=MAX_CHAPTERS).contains(&total) {
+            return Err("自适应规划没有给出有效章节总数，请重试".into());
+        }
+        let volumes = value
+            .get("volumes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|item| {
+                Some(VolumePlanInput {
+                    title: item
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    chapter_count: item.get("chapterCount").and_then(Value::as_i64)? as i32,
+                })
+            })
+            .collect::<Vec<_>>();
+        if volumes.is_empty() {
+            NormalizedPlan {
+                mode: "chapters".into(),
+                total_chapters: total,
+                volumes: vec![],
+            }
+        } else {
+            normalize_plan(&OutlineGenerateInput {
+                mode: "volumes".into(),
+                total_chapters: None,
+                volumes,
+            })
+            .map_err(|error| error.to_string())?
+        }
+    } else {
+        if blueprint_context.is_empty() {
+            return Err("策划章节或任务前请先确认叙事蓝本".into());
+        }
+        normalized
+    };
+    let mut premise = premise;
+    if !blueprint_context.is_empty() {
+        premise["narrativeBlueprint"] = Value::String(blueprint_context);
+    }
+    let mut plan = generate_plan(&client, &premise, normalized).await?;
     let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
+    let view = blueprint::current(&loaded.conn, &project_id)
+        .map_err(|error| error.to_string())?
+        .ok_or("策划章节或任务前请先确认叙事蓝本")?;
+    bind_logic_nodes(&mut plan, &view)?;
     let branch_id =
         crate::branches::current(&loaded.conn, &project_id).map_err(|error| error.to_string())?;
     outline::insert_plan(&mut loaded.conn, &project_id, &plan, branch_id.as_deref())
@@ -474,6 +660,37 @@ mod tests {
         assert_eq!(volumes.total_chapters, 200);
         assert_eq!(volumes.volumes[1].start_chapter, 81);
         assert_eq!(volumes.volumes[0].title.as_deref(), Some("第一卷"));
+    }
+
+    fn logic_node(order: i32, title: &str) -> NarrativeLogicNode {
+        NarrativeLogicNode {
+            id: format!("node-{order}"),
+            thread_id: None,
+            thread_title: "主线".into(),
+            order_no: order,
+            kind: "reveal".into(),
+            title: title.into(),
+            cause: "前因".into(),
+            choice: "选择".into(),
+            cost: "代价".into(),
+            outcome: "结果".into(),
+            state_change: "状态".into(),
+            knowledge_change: "认知".into(),
+            participants: vec![],
+            location: String::new(),
+            story_time: String::new(),
+            status: "confirmed".into(),
+        }
+    }
+
+    #[test]
+    fn resolves_logic_nodes_by_number_title_and_id() {
+        let nodes = vec![logic_node(1, "车票出现"), logic_node(2, "站长拦截")];
+        assert_eq!(resolve_logic_marker("1", &nodes).unwrap().title, "车票出现");
+        assert_eq!(resolve_logic_marker("#2", &nodes).unwrap().title, "站长拦截");
+        assert_eq!(resolve_logic_marker("站长拦截", &nodes).unwrap().order_no, 2);
+        assert_eq!(resolve_logic_marker("node-1", &nodes).unwrap().order_no, 1);
+        assert!(resolve_logic_marker("不存在", &nodes).is_none());
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod import;
 mod knowledge;
 mod llm;
 mod model;
+mod blueprint;
 mod outline;
 mod project;
 mod promises;
@@ -59,7 +60,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         app_info, project_create, project_open, project_close, project_state, model_get,
         model_save, model_test, seed_generate, premise_list, premise_active, premise_update,
-        premise_confirm, premise_archive, premise_debug_sources, chat_session_create,
+        premise_confirm, premise_archive, premise_debug_sources, blueprint_current, blueprint_candidate, blueprint_generate, blueprint_update, blueprint_confirm, blueprint_logic_context, blueprint_nodes, chat_session_create,
         chat_session_list, chat_session_get, chat_session_update, chat_session_archive,
         chat_session_unarchive, chat_session_delete, chat_session_fork, chat_messages_list,
         chat_capture, chat_summary, chat_send, chat_cancel, chat_candidates, outline_list,

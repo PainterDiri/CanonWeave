@@ -25,6 +25,8 @@ import {
   type ExportInput,
   type KnowledgeDomainInput,
   type KnowledgeEntryInput,
+  type NarrativeGenerateInput,
+  type NarrativeBlueprintEditInput,
 } from "./bindings";
 
 export type {
@@ -102,6 +104,17 @@ export type {
   KnowledgeEntryInput,
   KnowledgeField,
   VolumePlanInput,
+  NarrativeBlueprint,
+  NarrativeBlueprintView,
+  NarrativeGenerateInput,
+  NarrativeElement,
+  NarrativeThread,
+  NarrativeTimelineEvent,
+  NarrativeLogicNode,
+  NarrativeLogicEdge,
+  NarrativePresentation,
+  NarrativeDiagnostic,
+  NarrativeBlueprintEditInput,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -190,6 +203,19 @@ export const ipc = {
     guarded(async () => unwrap(await commands.premiseConfirm(id))),
   premiseDebugSources: (id: string) =>
     guarded(async () => unwrap(await commands.premiseDebugSources(id))),
+  blueprintCurrent: () =>
+    guarded(async () => unwrap(await commands.blueprintCurrent())),
+  blueprintCandidate: () =>
+    guarded(async () => unwrap(await commands.blueprintCandidate())),
+  blueprintGenerate: (input: NarrativeGenerateInput) =>
+    guarded(async () => unwrap(await commands.blueprintGenerate(input))),
+  blueprintUpdate: (input: NarrativeBlueprintEditInput) =>
+    guarded(async () => unwrap(await commands.blueprintUpdate(input))),
+  blueprintConfirm: (blueprintId: string) =>
+    guarded(async () => unwrap(await commands.blueprintConfirm(blueprintId))),
+  blueprintLogicContext: (limit?: number) =>
+    guarded(async () => unwrap(await commands.blueprintLogicContext(limit ?? null))),
+  blueprintNodes: () => guarded(async () => unwrap(await commands.blueprintNodes())),
 
   chatSessions: (scope: string | null, includeArchived = false) =>
     guarded(async () => unwrap(await commands.chatSessionList(scope, includeArchived))),

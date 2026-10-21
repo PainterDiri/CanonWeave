@@ -24,7 +24,7 @@ import {
 import { ipc, type OutlineNode } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 
-type StructureMode = "chapters" | "volumes";
+type StructureMode = "adaptive" | "chapters" | "volumes";
 
 type VolumeDraft = {
   title: string;
@@ -46,8 +46,9 @@ export function OutlinePanel({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<OutlineNode | null>(null);
   const [plannerOpen, setPlannerOpen] = useState(false);
-  const [mode, setMode] = useState<StructureMode>("chapters");
+  const [mode, setMode] = useState<StructureMode>("adaptive");
   const [totalChapters, setTotalChapters] = useState(24);
+  const [hasBlueprint, setHasBlueprint] = useState(false);
   const [volumes, setVolumes] = useState<VolumeDraft[]>(initialVolumes);
   const [expandedVolumes, setExpandedVolumes] = useState<Set<string>>(new Set());
   const [visibleLimit, setVisibleLimit] = useState(80);
@@ -56,8 +57,12 @@ export function OutlinePanel({
 
   const load = useCallback(async () => {
     try {
-      const list = await ipc.outlineList();
+      const [list, blueprint] = await Promise.all([
+        ipc.outlineList(),
+        ipc.blueprintCurrent(),
+      ]);
       setNodes(list);
+      setHasBlueprint(Boolean(blueprint));
       if (!list.length) setPlannerOpen(true);
       setExpandedVolumes(
         new Set(list.filter((node) => node.level === "volume").slice(0, 1).map((node) => node.id)),
@@ -87,7 +92,8 @@ export function OutlinePanel({
     (sum, volume) => sum + (Number.isFinite(volume.chapterCount) ? volume.chapterCount : 0),
     0,
   );
-  const requestedTotal = mode === "chapters" ? totalChapters : totalFromVolumes;
+  const requestedTotal =
+    mode === "adaptive" ? 0 : mode === "chapters" ? totalChapters : totalFromVolumes;
   const currentMode = volumeNodes.length ? "volumes" : "chapters";
 
   const generate = async () => {
@@ -97,6 +103,10 @@ export function OutlinePanel({
     }
     if (mode === "volumes" && volumes.some((volume) => volume.chapterCount < 1)) {
       setError("每一卷至少要有 1 章");
+      return;
+    }
+    if (!hasBlueprint) {
+      setError("请先在叙事蓝本中确认完整逻辑链，再编排章节。");
       return;
     }
     setGenerating(true);
@@ -178,6 +188,7 @@ export function OutlinePanel({
       {plannerOpen || nodes.length === 0 ? (
         <StructurePlanner
           hasPremise={hasPremise}
+          hasBlueprint={hasBlueprint}
           mode={mode}
           onMode={setMode}
           totalChapters={totalChapters}
@@ -339,6 +350,7 @@ export function OutlinePanel({
 
 function StructurePlanner({
   hasPremise,
+  hasBlueprint,
   mode,
   onMode,
   totalChapters,
@@ -353,6 +365,7 @@ function StructurePlanner({
   onCancel,
 }: {
   hasPremise: boolean;
+  hasBlueprint: boolean;
   mode: StructureMode;
   onMode: (mode: StructureMode) => void;
   totalChapters: number;
@@ -380,16 +393,30 @@ function StructurePlanner({
       />
     );
   }
+  if (!hasBlueprint) {
+    return (
+      <EmptyState
+        icon={<Wand2 size={20} />}
+        title="先确认叙事蓝本"
+        description="章节必须从完整逻辑链派生。请先在“叙事蓝本”中确认人物关系、世界规则、时间线与因果链。"
+        action={
+          <Button tone="primary" onClick={onNeedPremise}>
+            返回规划
+          </Button>
+        }
+      />
+    );
+  }
   return (
     <section className="paper-card p-6">
       <div className="flex items-start justify-between gap-5">
         <div>
           <div className="flex items-center gap-2">
             <Layers3 size={16} className="text-teal" />
-            <h2 className="display text-[22px] text-ink">先定义作品的叙事长度</h2>
+            <h2 className="display text-[22px] text-ink">根据逻辑链编排章节</h2>
           </div>
           <p className="mt-1.5 max-w-2xl text-[11.5px] leading-6 text-muted">
-            作者决定只写若干章，或按卷组织数百章。长篇会分批调用模型生成，避免一次输出截断。
+            默认由叙事蓝本估算体量与阶段；已有硬性篇幅要求时再固定章节数。长篇仍会分批生成，但每一批都必须承接同一逻辑链。
           </p>
         </div>
         {onCancel ? (
@@ -400,6 +427,14 @@ function StructurePlanner({
       </div>
 
       <div className="mt-5 inline-flex rounded-full border border-line bg-paper p-0.5">
+        <button
+          onClick={() => onMode("adaptive")}
+          className={`rounded-full px-3.5 py-1.5 text-[11px] transition ${
+            mode === "adaptive" ? "bg-teal text-paper-raised" : "text-muted hover:text-ink"
+          }`}
+        >
+          逻辑链自适应
+        </button>
         <button
           onClick={() => onMode("chapters")}
           className={`rounded-full px-3.5 py-1.5 text-[11px] transition ${
@@ -418,7 +453,11 @@ function StructurePlanner({
         </button>
       </div>
 
-      {mode === "chapters" ? (
+      {mode === "adaptive" ? (
+        <div className="mt-5 rounded-xl border border-teal/20 bg-teal-soft/35 px-4 py-3 text-[11px] leading-6 text-teal">
+          模型会依据逻辑节点、人物弧线、信息揭示与阶段转折估算章节总量。确认骨架后，仍可继续增加或调整后续章节。
+        </div>
+      ) : mode === "chapters" ? (
         <div className="mt-5 max-w-[320px]">
           <Field label="章节总数" hint="1 至 1200 章">
             <Input
@@ -480,13 +519,19 @@ function StructurePlanner({
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
         <div className="text-[10.5px] text-muted">
-          全书共 <b className="text-ink">{requestedTotal}</b> 章
-          {requestedTotal > 120 ? " · 将分批生成，模型调用次数和耗时较高" : ""}
+          {mode === "adaptive" ? (
+            <>由逻辑链估算全书体量，生成后再确认阶段与章节。</>
+          ) : (
+            <>
+              全书共 <b className="text-ink">{requestedTotal}</b> 章
+              {requestedTotal > 120 ? " · 将分批生成，模型调用次数和耗时较高" : ""}
+            </>
+          )}
         </div>
         <Button
           tone="primary"
           onClick={onGenerate}
-          disabled={generating || requestedTotal < 1 || requestedTotal > 1200}
+          disabled={generating || (mode !== "adaptive" && (requestedTotal < 1 || requestedTotal > 1200))}
           icon={
             generating ? (
               <LoaderCircle size={14} className="animate-spin" />

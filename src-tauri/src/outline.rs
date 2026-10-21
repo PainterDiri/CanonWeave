@@ -21,16 +21,20 @@ fn node_from_row(row: &Row<'_>) -> rusqlite::Result<OutlineNode> {
         conflict: row.get(6)?,
         turn: row.get(7)?,
         payoff: row.get(8)?,
-        status: row.get(9)?,
-        branch_id: row.get(10)?,
-        source: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        logic_node_ids: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
+        presentation_mode: row.get(10)?,
+        narrative_function: row.get(11)?,
+        status: row.get(12)?,
+        branch_id: row.get(13)?,
+        source: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
 const SELECT: &str = "SELECT id, parent_id, level, order_no, title, goal, conflict, turn,
-    payoff, status, branch_id, source, created_at, updated_at FROM outline_node";
+    payoff, logic_node_ids, presentation_mode, narrative_function, status, branch_id,
+    source, created_at, updated_at FROM outline_node";
 
 pub fn list(conn: &Connection, project_id: &str) -> AppResult<Vec<OutlineNode>> {
     let mut stmt = conn.prepare(&format!(
@@ -85,6 +89,9 @@ pub struct OutlineChapterDraft {
     pub conflict: String,
     pub turn: String,
     pub payoff: String,
+    pub logic_node_ids: Vec<String>,
+    pub presentation_mode: String,
+    pub narrative_function: String,
 }
 
 #[derive(Debug, Clone)]
@@ -164,8 +171,9 @@ pub fn insert_plan(
         tx.execute(
             "INSERT INTO outline_node
              (id, project_id, parent_id, level, order_no, title, goal, conflict, turn, payoff,
-              status, branch_id, source, created_at, updated_at)
-             VALUES (?1,?2,?3,'chapter',?4,?5,?6,?7,?8,?9,'candidate',?10,'ai',?11,?11)",
+              status, branch_id, source, logic_node_ids, presentation_mode,
+              narrative_function, created_at, updated_at)
+             VALUES (?1,?2,?3,'chapter',?4,?5,?6,?7,?8,?9,'candidate',?10,'ai',?11,?12,?13,?14,?14)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 project_id,
@@ -177,6 +185,9 @@ pub fn insert_plan(
                 chapter.turn,
                 chapter.payoff,
                 branch_id,
+                serde_json::to_string(&chapter.logic_node_ids).unwrap_or_else(|_| "[]".into()),
+                chapter.presentation_mode,
+                chapter.narrative_function,
                 ts
             ],
         )?;
@@ -498,6 +509,9 @@ mod tests {
                     conflict: "雨势吞没道路".into(),
                     turn: "入口在灯下".into(),
                     payoff: "旧灯".into(),
+                    logic_node_ids: vec![],
+                    presentation_mode: "prose".into(),
+                    narrative_function: "".into(),
                 },
                 OutlineChapterDraft {
                     number: 2,
@@ -507,6 +521,9 @@ mod tests {
                     conflict: "文字会消失".into(),
                     turn: "契约认主".into(),
                     payoff: "禁墟核心".into(),
+                    logic_node_ids: vec![],
+                    presentation_mode: "prose".into(),
+                    narrative_function: "".into(),
                 },
                 OutlineChapterDraft {
                     number: 3,
@@ -516,6 +533,9 @@ mod tests {
                     conflict: "记忆被篡改".into(),
                     turn: "灾厄曾是守门人".into(),
                     payoff: "旧盟友".into(),
+                    logic_node_ids: vec![],
+                    presentation_mode: "prose".into(),
+                    narrative_function: "".into(),
                 },
             ],
         };

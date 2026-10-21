@@ -36,7 +36,7 @@ flowchart LR
 主要页面：
 
 - `features/studio`：按章写作；场景仅在需要时作为分场工具显示。
-- `features/seed`：种子卡、作者定义卷章、旧稿导入和骨架。
+- `features/seed`：种子卡、叙事蓝本、图形化因果图、作者定义卷章、旧稿导入和骨架。
 - `features/agent`：独立任务助手与协作会话。
 - `features/knowledge`：环境、物品和自定义知识域。
 - `features/characters`：人物核心和声音样本。
@@ -65,13 +65,17 @@ flowchart LR
 
 ## 主要数据流
 
-### 作者定义卷章
+### 叙事蓝本与卷章
 
 ```text
-作者输入总章数/卷章数
-  → 分卷元数据请求
-  → 每 16 章一批生成章节骨架
-  → 成功后一次性写 outline_node
+确认种子卡
+  → 生成人物/势力/世界规则/时间线/叙事线地基
+  → 生成唯一因果链与呈现契约
+  → 完整性诊断（错误阻断确认）
+  → 作者确认叙事蓝本
+  → adaptive：估算体量和阶段；fixed：适配目标章节/任务数
+  → 每 16 章一批把逻辑节点编排为章节骨架
+  → 成功后一次性写 outline_node + logic_node_ids
   → 作者确认
   → 建立 chapter，并写 volume_id
 ```
@@ -89,8 +93,9 @@ flowchart LR
 ### 正文生成
 
 ```text
-本章写作任务
-  → context::compile
+本章写作任务 + 逻辑节点 + 呈现契约
+  → context::compile（L1 注入叙事蓝本与因果链）
+  → 按 novel/game 选择散文或对白/环境/道具/过场脚本
   → generation
   → candidate
   → 审计 / 人工确认
