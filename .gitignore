@@ -13,6 +13,16 @@
 *.swo
 *~
 
+# Local coding-agent state and internal development notes
+.agents/
+.codex/
+/docs/README.md
+/docs/ARCHITECTURE.md
+/docs/DATA_MODEL.md
+/docs/handoffs/
+/叙事织网_开发文档.md
+/开发进度.md
+
 # Node.js / frontend
 node_modules/
 .pnpm-store/
