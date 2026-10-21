@@ -480,7 +480,10 @@ mod tests {
         let reopened = project::open(&root).unwrap();
         assert_eq!(reopened.summary.id, pid);
         assert_eq!(reopened.summary.created_at, created_at);
-        assert_eq!(reopened.summary.schema_version, 5);
+        assert_eq!(
+            reopened.summary.schema_version,
+            crate::db::SCHEMA_VERSION as i32
+        );
         assert_eq!(crate::voice::profile(&reopened.conn, &pid, "lin").unwrap().sample_count, 1);
         assert_eq!(crate::preferences::summary(&reopened.conn, &pid, None).unwrap().choices, 1);
         assert!(crate::wiki::list(&reopened.conn, &pid)

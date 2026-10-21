@@ -19,6 +19,7 @@ const project = {
     pendingCandidates: 6,
     chapters: 10,
     entities: 4,
+    knowledgeEntries: 4,
     openIssues: 1,
     promises: 3,
   },
@@ -82,7 +83,15 @@ const candidate2 = {
 
 const chapter = (n: number, title: string, status = "candidate") => ({
   id: `o${n}`,
-  parentId: null,
+  number: n,
+  volumeId: n <= 5 ? "v1" : "v2",
+  volumeTitle: n <= 5 ? "第一卷 · 雨中的来信" : "第二卷 · 空站的回声",
+  currentRevisionId: n <= 2 ? `rev-${n}` : null,
+  styleProfileId: "style1",
+  styleEpoch: 1,
+  sceneCount: n === 1 ? 1 : 0,
+  updatedAt: "2026-10-20T08:05:00Z",
+  parentId: n <= 5 ? "v1" : "v2",
   level: "chapter",
   orderNo: n,
   title,
@@ -121,7 +130,42 @@ async function installMock(page: import("@playwright/test").Page) {
             case "premise_active":
               return premise;
             case "outline_list":
-              return chapters;
+              return [
+                {
+                  id: "v1",
+                  parentId: null,
+                  level: "volume",
+                  orderNo: 1,
+                  title: "第一卷 · 雨中的来信",
+                  goal: "确认父亲死亡背后的异常",
+                  conflict: "家族要求尽快结束葬礼",
+                  turn: "信件来自尚未发生的下周",
+                  payoff: "打开旧车站",
+                  status: "confirmed",
+                  branchId: null,
+                  source: "ai",
+                  createdAt: "2026-10-20T08:05:00Z",
+                  updatedAt: "2026-10-20T08:05:00Z",
+                },
+                ...chapters.slice(0, 5).map((item) => ({ ...item, parentId: "v1", status: "confirmed" })),
+                {
+                  id: "v2",
+                  parentId: null,
+                  level: "volume",
+                  orderNo: 2,
+                  title: "第二卷 · 空站的回声",
+                  goal: "追查寄信者与旧车站",
+                  conflict: "母亲和守夜人各自隐瞒真相",
+                  turn: "父亲留下的是一套未完成的时间规则",
+                  payoff: "把选择交给林澈",
+                  status: "candidate",
+                  branchId: null,
+                  source: "ai",
+                  createdAt: "2026-10-20T08:05:00Z",
+                  updatedAt: "2026-10-20T08:05:00Z",
+                },
+                ...chapters.slice(5).map((item) => ({ ...item, parentId: "v2" })),
+              ];
             case "chat_session_list":
               return [
                 {
@@ -385,6 +429,100 @@ async function installMock(page: import("@playwright/test").Page) {
                   voiceAnchor: "“先别下结论。把信给我。”",
                 },
               ];
+            case "knowledge_domains":
+              return [
+                {
+                  id: "domain-env",
+                  key: "environment",
+                  name: "环境",
+                  description: "地点之间的地理关系、空间布置、景色与环境规则。",
+                  icon: "landmark",
+                  accent: "teal",
+                  isSystem: true,
+                  sortOrder: 10,
+                  entryCount: 1,
+                  fieldSchema: [
+                    { key: "category", label: "环境类型", placeholder: "城市、建筑群或特殊空间" },
+                    { key: "geography", label: "地理关系", placeholder: "相邻、位于、如何抵达" },
+                    { key: "landscape", label: "景色与感官", placeholder: "光线、声音、气味" },
+                  ],
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+                {
+                  id: "domain-item",
+                  key: "item",
+                  name: "重要物品",
+                  description: "与剧情紧密相关的物品、能力、归属与流转记录。",
+                  icon: "package",
+                  accent: "teal",
+                  isSystem: true,
+                  sortOrder: 20,
+                  entryCount: 1,
+                  fieldSchema: [
+                    { key: "function", label: "作用与能力", placeholder: "它能做什么" },
+                    { key: "ownership", label: "归属与流转", placeholder: "当前持有者" },
+                  ],
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+                {
+                  id: "domain-forsaken",
+                  key: "custom-forsaken",
+                  name: "禁墟",
+                  description: "记录禁墟能力、代价与克制关系。",
+                  icon: "sparkles",
+                  accent: "amber",
+                  isSystem: false,
+                  sortOrder: 30,
+                  entryCount: 1,
+                  fieldSchema: [
+                    { key: "field1", label: "能力", placeholder: "禁墟能力" },
+                    { key: "field2", label: "克制关系", placeholder: "被什么克制" },
+                  ],
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "knowledge_entries": {
+              const rows = [
+                {
+                  id: "ke1",
+                  entityId: "e3",
+                  domainId: "domain-env",
+                  domainKey: "environment",
+                  domainName: "环境",
+                  name: "旧车站",
+                  aliases: ["雨站"],
+                  summary: "只在雨夜出现，站台钟比现实慢七分钟。",
+                  fields: {
+                    category: "废弃车站",
+                    geography: "位于北堤尽头，穿过旧检票口可达",
+                    landscape: "潮湿铁轨、蓝色站灯、不断倒流的雨",
+                  },
+                  status: "confirmed",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+                {
+                  id: "ke2",
+                  entityId: "e4",
+                  domainId: "domain-forsaken",
+                  domainKey: "custom-forsaken",
+                  domainName: "禁墟",
+                  name: "雨墟",
+                  aliases: ["旧雨区"],
+                  summary: "吞噬声音的空间。",
+                  fields: { field1: "让所有声音延迟七分钟", field2: "雷火会烧穿边界" },
+                  status: "confirmed",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+              return rows.filter(
+                (entry) => !args?.domainId || entry.domainId === args.domainId,
+              );
+            }
             case "voice_sample_list":
               return [
                 {
@@ -526,7 +664,7 @@ async function installMock(page: import("@playwright/test").Page) {
                 includesWiki: true,
               };
             case "app_info":
-              return { name: "CanonWeave", version: "0.1.0", schemaVersion: 1 };
+              return { name: "CanonWeave", version: "0.1.0", schemaVersion: 6 };
             case "plugin:event|listen":
               return 1;
             default:
@@ -551,19 +689,23 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await installMock(page);
   await page.goto("/");
   await expect(page.getByText("雨夜的第七封信").first()).toBeVisible();
+  const primaryNav = page.locator("aside nav button");
+  await expect(primaryNav.nth(1)).toContainText("正文");
+  await expect(primaryNav.nth(2)).toContainText("协作助手");
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join("test-results", "overview.png") });
 
-  await page.getByRole("button", { name: "灵感", exact: true }).click();
+  await page.getByRole("button", { name: "灵感与卷章", exact: true }).click();
   await expect(page.getByText("种子卡").first()).toBeVisible();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "seed.png") });
 
-  await page.getByRole("button", { name: "创作对话" }).click();
-  await expect(page.getByText("守护者").or(page.getByText("母亲坚持封棺"))).toBeVisible({ timeout: 5000 }).catch(() => {});
+  await page.getByRole("button", { name: /协作助手/ }).click();
+  await expect(page.getByText("建议把第一场放在守夜之后")).toBeVisible();
   await page.screenshot({ path: path.join("test-results", "chat.png") });
 
-  await page.getByRole("button", { name: "十章骨架" }).click();
+  await page.getByRole("button", { name: "灵感与卷章", exact: true }).click();
+  await page.getByRole("button", { name: "卷章规划", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "outline.png") });
 
@@ -576,11 +718,17 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "characters.png") });
 
+  await page.getByRole("button", { name: "知识库", exact: true }).click();
+  await expect(page.getByText("环境").first()).toBeVisible();
+  await expect(page.getByText("旧车站").first()).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: path.join("test-results", "knowledge.png") });
+
   await page.getByRole("button", { name: "伏笔", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "promises.png") });
 
-  await page.getByRole("button", { name: "百科", exact: true }).click();
+  await page.getByRole("button", { name: "叙事百科", exact: true }).click();
   await expect(page.getByText("Narrative Wiki Compiler")).toBeVisible();
   await expect(page.getByText("作者修改") /* no pending fixture */).toHaveCount(0);
   await expect(page.getByText("林澈", { exact: true }).first()).toBeVisible();
@@ -591,7 +739,7 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.waitForTimeout(450);
   await page.screenshot({ path: path.join("test-results", "studio.png") });
 
-  await page.getByRole("button", { name: "设定", exact: true }).click();
+  await page.getByRole("button", { name: "设定与配置", exact: true }).click();
   await page.getByRole("button", { name: "文笔", exact: true }).click();
   await page.waitForTimeout(450);
   await page.screenshot({ path: path.join("test-results", "style.png") });

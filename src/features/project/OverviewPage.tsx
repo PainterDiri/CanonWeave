@@ -17,12 +17,12 @@ export function OverviewPage({ project }: { project: ProjectSnapshot }) {
   const stats = [
     ["待确认候选", project.counts.pendingCandidates, "项"],
     ["章节", project.counts.chapters, "章"],
-    ["人物与实体", project.counts.entities, "个"],
+    ["知识条目", project.counts.knowledgeEntries, "条"],
     ["未结伏笔", project.counts.promises, "条"],
   ];
   const checklist = [
     { label: "确认种子卡", done: project.counts.premises > 0, target: "seed" as const },
-    { label: "生成十章骨架", done: project.counts.chapters > 0, target: "seed" as const },
+    { label: "规划卷章骨架", done: project.counts.chapters > 0, target: "seed" as const },
     { label: "建立文笔档案", done: false, target: "canon" as const },
     { label: "开始第一场", done: false, target: "studio" as const },
   ];
@@ -100,10 +100,10 @@ export function OverviewPage({ project }: { project: ProjectSnapshot }) {
           </div>
           <div className="hairline my-5" />
           <div className="flex items-center gap-3">
-            <Button tone="primary" onClick={() => setNav("seed")} icon={<Sparkles size={14} />}>
-              从灵感开始
+            <Button onClick={() => setNav("seed")} icon={<Sparkles size={14} />}>
+              规划卷章
             </Button>
-            <Button onClick={() => setNav("studio")} icon={<Feather size={14} />}>
+            <Button tone="primary" onClick={() => setNav("studio")} icon={<Feather size={14} />}>
               进入正文
             </Button>
           </div>
@@ -148,8 +148,8 @@ export function OverviewPage({ project }: { project: ProjectSnapshot }) {
         </div>
         <div className="grid grid-cols-4 gap-3">
           {[
-            { icon: Compass, label: "种子与骨架", nav: "seed" as const },
-            { icon: BookOpen, label: "人物与设定", nav: "characters" as const },
+            { icon: Compass, label: "卷章规划", nav: "seed" as const },
+            { icon: BookOpen, label: "人物与知识库", nav: "knowledge" as const },
             { icon: Flag, label: "伏笔台账", nav: "promises" as const },
             { icon: ShieldCheck, label: "冲突审计", nav: "audit" as const },
           ].map((item) => {

@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpen,
+  Bot,
   Boxes,
   Compass,
+  Database,
   Feather,
   GitBranch,
   Library,
@@ -15,23 +17,46 @@ import type { ProjectSnapshot } from "@/lib/ipc";
 import { ipc, type BranchRecord } from "@/lib/ipc";
 import { useAppStore, type NavKey, type WorkspaceMode } from "@/stores/ui";
 
-const navItems: { key: NavKey; label: string; icon: typeof Compass; mode: WorkspaceMode }[] = [
-  { key: "overview", label: "概览", icon: Compass, mode: "seed" },
-  { key: "seed", label: "灵感", icon: Sparkles, mode: "seed" },
-  { key: "canon", label: "设定", icon: Boxes, mode: "seed" },
-  { key: "characters", label: "人物", icon: Waypoints, mode: "map" },
-  { key: "timeline", label: "时间线", icon: GitBranch, mode: "map" },
-  { key: "promises", label: "伏笔", icon: Feather, mode: "audit" },
-  { key: "wiki", label: "百科", icon: Library, mode: "seed" },
-  { key: "studio", label: "正文", icon: BookOpen, mode: "studio" },
-  { key: "audit", label: "审计", icon: ShieldCheck, mode: "audit" },
-];
+type NavItem = {
+  key: NavKey;
+  label: string;
+  icon: typeof Compass;
+  mode: WorkspaceMode;
+};
 
-const modeLabels: { key: WorkspaceMode; label: string }[] = [
-  { key: "seed", label: "Seed" },
-  { key: "studio", label: "Studio" },
-  { key: "map", label: "Map" },
-  { key: "audit", label: "Audit" },
+const navGroups: { label: string | null; items: NavItem[] }[] = [
+  {
+    label: null,
+    items: [{ key: "overview", label: "概览", icon: Compass, mode: "studio" }],
+  },
+  {
+    label: "写作",
+    items: [
+      { key: "studio", label: "正文", icon: BookOpen, mode: "studio" },
+      { key: "agent", label: "协作助手", icon: Bot, mode: "studio" },
+    ],
+  },
+  {
+    label: "故事资料",
+    items: [
+      { key: "characters", label: "人物", icon: Waypoints, mode: "map" },
+      { key: "knowledge", label: "知识库", icon: Database, mode: "map" },
+      { key: "timeline", label: "时间线", icon: GitBranch, mode: "map" },
+      { key: "promises", label: "伏笔", icon: Feather, mode: "audit" },
+      { key: "wiki", label: "叙事百科", icon: Library, mode: "map" },
+    ],
+  },
+  {
+    label: "质量",
+    items: [{ key: "audit", label: "一致性审计", icon: ShieldCheck, mode: "audit" }],
+  },
+  {
+    label: "项目",
+    items: [
+      { key: "seed", label: "灵感与卷章", icon: Sparkles, mode: "seed" },
+      { key: "canon", label: "设定与配置", icon: Boxes, mode: "seed" },
+    ],
+  },
 ];
 
 export function AppShell({
@@ -46,10 +71,10 @@ export function AppShell({
   const nav = useAppStore((s) => s.nav);
   const setNav = useAppStore((s) => s.setNav);
   const setMode = useAppStore((s) => s.setMode);
-  const activeMode = useAppStore((s) => s.activeMode);
   const refreshProject = useAppStore((s) => s.refreshProject);
   const notify = useAppStore((s) => s.notify);
   const [branches, setBranches] = useState<BranchRecord[]>([]);
+  const navItems = navGroups.flatMap((group) => group.items);
 
   useEffect(() => {
     void ipc
@@ -86,13 +111,7 @@ export function AppShell({
     setNav(key);
   };
 
-  const setWorkspaceMode = (mode: WorkspaceMode) => {
-    setMode(mode);
-    if (mode === "seed") setNav("seed");
-    if (mode === "studio") setNav("studio");
-    if (mode === "map") setNav("timeline");
-    if (mode === "audit") setNav("audit");
-  };
+  const activeLabel = navItems.find((item) => item.key === nav)?.label ?? "概览";
 
   return (
     <div className="flex h-full min-h-0">
@@ -113,33 +132,50 @@ export function AppShell({
           </div>
         </div>
 
-        <nav className="mt-2 flex-1 space-y-0.5 px-3">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = nav === item.key;
-            return (
-              <button
-                key={item.key}
-                onClick={() => go(item.key)}
-                className={`focus-ring group flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left transition ${
-                  active
-                    ? "bg-teal text-paper-raised shadow-[0_4px_12px_rgba(17,75,69,0.16)]"
-                    : "text-ink-soft hover:bg-ink/5"
-                }`}
-              >
-                <Icon size={15} strokeWidth={active ? 2 : 1.7} className={active ? "text-paper-raised" : "text-muted"} />
-                <span className="text-[12.5px] font-medium">{item.label}</span>
-                {item.key === "audit" && project.counts.openIssues > 0 ? (
-                  <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-1 text-[9px] font-semibold text-white">
-                    {project.counts.openIssues}
-                  </span>
-                ) : null}
-                {item.key === "seed" && project.counts.pendingCandidates > 0 && active ? (
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-paper-raised/80" />
-                ) : null}
-              </button>
-            );
-          })}
+        <nav className="mt-2 flex-1 overflow-y-auto px-3 pb-2">
+          {navGroups.map((group, groupIndex) => (
+            <div key={group.label ?? `group-${groupIndex}`} className={groupIndex ? "mt-4" : ""}>
+              {group.label ? (
+                <div className="mb-1.5 px-3 text-[9px] font-semibold tracking-[0.16em] text-muted/75">
+                  {group.label}
+                </div>
+              ) : null}
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = nav === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      onClick={() => go(item.key)}
+                      className={`focus-ring group flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left transition ${
+                        active
+                          ? "bg-teal text-paper-raised"
+                          : "text-ink-soft hover:bg-ink/5"
+                      }`}
+                    >
+                      <Icon
+                        size={15}
+                        strokeWidth={active ? 2 : 1.7}
+                        className={active ? "text-paper-raised" : "text-muted"}
+                      />
+                      <span className="text-[12px] font-medium">{item.label}</span>
+                      {item.key === "audit" && project.counts.openIssues > 0 ? (
+                        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-1 text-[9px] font-semibold text-white">
+                          {project.counts.openIssues}
+                        </span>
+                      ) : null}
+                      {item.key === "agent" && project.counts.pendingCandidates > 0 ? (
+                        <span className="ml-auto rounded-full bg-amber-soft px-1.5 text-[9px] font-medium text-amber">
+                          {project.counts.pendingCandidates}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-line px-3 py-3">
@@ -160,20 +196,10 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="window-drag flex h-[54px] shrink-0 items-center justify-between border-b border-line bg-paper/50 px-5">
           <div className="no-drag flex items-center gap-4">
-            <div className="flex items-center gap-1 rounded-full border border-line bg-paper-raised p-0.5">
-              {modeLabels.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => setWorkspaceMode(item.key)}
-                  className={`rounded-full px-2.5 py-1 text-[10px] font-medium tracking-wide transition ${
-                    activeMode === item.key
-                      ? "bg-teal text-paper-raised"
-                      : "text-muted hover:text-ink"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="font-medium text-ink">{project.project.name}</span>
+              <span className="text-muted">/</span>
+              <span className="text-ink-soft">{activeLabel}</span>
             </div>
             <div className="hidden h-4 w-px bg-line md:block" />
             <div className="hidden items-center gap-1.5 text-[10.5px] text-muted lg:flex">

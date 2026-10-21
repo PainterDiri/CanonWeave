@@ -10,6 +10,7 @@ mod fact_delta;
 mod branches;
 mod graphrag;
 mod import;
+mod knowledge;
 mod llm;
 mod model;
 mod outline;
@@ -65,7 +66,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         outline_generate, outline_update, outline_confirm, outline_drop, outline_status,
         document_import, document_list, extraction_run, review_queue, candidate_list,
         candidate_accept, candidate_reject, candidate_update_payload, entity_list,
-        character_list, character_save, promise_list, promise_save, promise_transition,
+        character_list, character_save, knowledge_domains, knowledge_domain_create,
+        knowledge_entries, knowledge_entry_save, promise_list, promise_save, promise_transition,
         promise_payoff_check, promise_payoff,
         style_preset_list, style_profile_list, style_profile_get, style_profile_save,
         style_profile_apply_preset, style_sample_add, style_sample_list, style_analyze,

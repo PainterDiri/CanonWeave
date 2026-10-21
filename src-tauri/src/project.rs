@@ -98,6 +98,7 @@ pub fn create(input: &CreateProjectInput) -> AppResult<LoadedProject> {
         params![format!("policy-{id}"), id, ts],
     )?;
     crate::rules::seed_defaults(&tx, &id)?;
+    crate::knowledge::ensure_defaults(&tx, &id)?;
     tx.commit()?;
 
     let file = ProjectFile {
@@ -137,7 +138,7 @@ pub fn open(root: &Path) -> AppResult<LoadedProject> {
             root.display()
         )));
     }
-    let file: ProjectFile = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)?;
+    let mut file: ProjectFile = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)?;
     if file.schema_version as i64 > db::SCHEMA_VERSION {
         return Err(AppError::Message(format!(
             "项目由更高版本创建（schema {}），请升级应用后再打开",
@@ -145,6 +146,7 @@ pub fn open(root: &Path) -> AppResult<LoadedProject> {
         )));
     }
     let conn = db::open(&root.join(DB_FILE))?;
+    crate::knowledge::ensure_defaults(&conn, &file.id)?;
     let summary = conn
         .query_row(
             "SELECT id, name, root_path, mode, current_branch_id, writing_language, schema_version, created_at, updated_at
@@ -166,6 +168,10 @@ pub fn open(root: &Path) -> AppResult<LoadedProject> {
         )
         .optional()?
         .ok_or_else(|| AppError::Message("project.json 与数据库不一致：找不到项目记录".into()))?;
+    if file.schema_version != db::SCHEMA_VERSION as i32 {
+        file.schema_version = db::SCHEMA_VERSION as i32;
+        write_project_file(&root, &file)?;
+    }
     Ok(LoadedProject {
         summary,
         root,
@@ -183,6 +189,7 @@ pub fn counts(conn: &Connection, project_id: &str) -> AppResult<ProjectCounts> {
         pending_candidates: count("SELECT COUNT(*) FROM candidate WHERE project_id = ?1 AND status = 'pending'")? as i32,
         chapters: count("SELECT COUNT(*) FROM chapter WHERE project_id = ?1")? as i32,
         entities: count("SELECT COUNT(*) FROM entity WHERE project_id = ?1")? as i32,
+        knowledge_entries: count("SELECT COUNT(*) FROM knowledge_entry WHERE project_id = ?1")? as i32,
         open_issues: count("SELECT COUNT(*) FROM issue WHERE project_id = ?1 AND status = 'open'")? as i32,
         promises: count("SELECT COUNT(*) FROM promise WHERE project_id = ?1 AND state NOT IN ('paid_off','abandoned')")? as i32,
     })

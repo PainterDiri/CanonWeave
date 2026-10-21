@@ -64,7 +64,7 @@ export const commands = {
 	chatCancel: (requestId: string) => typedError<null, string>(__TAURI_INVOKE("chat_cancel", { requestId })),
 	chatCandidates: (sessionId: string) => typedError<Candidate[], string>(__TAURI_INVOKE("chat_candidates", { sessionId })),
 	outlineList: () => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_list")),
-	outlineGenerate: () => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_generate")),
+	outlineGenerate: (input: OutlineGenerateInput) => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_generate", { input })),
 	outlineUpdate: (input: OutlineUpdateInput) => typedError<OutlineNode, string>(__TAURI_INVOKE("outline_update", { input })),
 	outlineConfirm: (ids: string[]) => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_confirm", { ids })),
 	outlineDrop: (id: string) => typedError<null, string>(__TAURI_INVOKE("outline_drop", { id })),
@@ -80,6 +80,10 @@ export const commands = {
 	entityList: (entityType: string | null) => typedError<Entity[], string>(__TAURI_INVOKE("entity_list", { entityType })),
 	characterList: () => typedError<CharacterDetail[], string>(__TAURI_INVOKE("character_list")),
 	characterSave: (input: CharacterInput) => typedError<CharacterDetail, string>(__TAURI_INVOKE("character_save", { input })),
+	knowledgeDomains: () => typedError<KnowledgeDomain[], string>(__TAURI_INVOKE("knowledge_domains")),
+	knowledgeDomainCreate: (input: KnowledgeDomainInput) => typedError<KnowledgeDomain, string>(__TAURI_INVOKE("knowledge_domain_create", { input })),
+	knowledgeEntries: (domainId: string | null) => typedError<KnowledgeEntry[], string>(__TAURI_INVOKE("knowledge_entries", { domainId })),
+	knowledgeEntrySave: (input: KnowledgeEntryInput) => typedError<KnowledgeEntry, string>(__TAURI_INVOKE("knowledge_entry_save", { input })),
 	promiseList: () => typedError<PromiseRecord[], string>(__TAURI_INVOKE("promise_list")),
 	promiseSave: (input: PromiseInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_save", { input })),
 	promiseTransition: (input: PromiseStateInput) => typedError<PromiseRecord, string>(__TAURI_INVOKE("promise_transition", { input })),
@@ -260,6 +264,8 @@ export type CandidateCounts = {
 export type ChapterRecord = {
 	id: string,
 	number: number,
+	volumeId: string | null,
+	volumeTitle: string | null,
 	title: string,
 	status: string,
 	currentRevisionId: string | null,
@@ -527,6 +533,57 @@ export type IssueActionInput = {
 	reason: string,
 };
 
+export type KnowledgeDomain = {
+	id: string,
+	key: string,
+	name: string,
+	description: string,
+	icon: string,
+	accent: string,
+	isSystem: boolean,
+	sortOrder: number,
+	fieldSchema: KnowledgeField[],
+	entryCount: number,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type KnowledgeDomainInput = {
+	name: string,
+	description: string,
+	fields: string[],
+};
+
+export type KnowledgeEntry = {
+	id: string,
+	entityId: string | null,
+	domainId: string,
+	domainKey: string,
+	domainName: string,
+	name: string,
+	aliases: string[],
+	summary: string,
+	fields: any,
+	status: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type KnowledgeEntryInput = {
+	id: string | null,
+	domainId: string,
+	name: string,
+	aliases: string[],
+	summary: string,
+	fields: any,
+};
+
+export type KnowledgeField = {
+	key: string,
+	label: string,
+	placeholder: string,
+};
+
 export type ModelConfig = {
 	baseUrl: string,
 	model: string,
@@ -574,6 +631,12 @@ export type MotifRecord = {
 	firstSceneId: string | null,
 	lastSceneId: string | null,
 	useCount: number,
+};
+
+export type OutlineGenerateInput = {
+	mode: string,
+	totalChapters: number | null,
+	volumes: VolumePlanInput[],
 };
 
 export type OutlineNode = {
@@ -714,6 +777,7 @@ export type ProjectCounts = {
 	pendingCandidates: number,
 	chapters: number,
 	entities: number,
+	knowledgeEntries: number,
 	openIssues: number,
 	promises: number,
 };
@@ -1111,6 +1175,11 @@ export type VoiceThresholds = {
 	punctuation: number,
 	pronoun: number,
 	dialogueAction: number,
+};
+
+export type VolumePlanInput = {
+	title: string | null,
+	chapterCount: number,
 };
 
 export type WikiEditInput = {

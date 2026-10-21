@@ -24,7 +24,7 @@ const modes = [
   {
     id: "idea",
     title: "从一句话开始",
-    body: "用一个画面或冲突孵化种子卡与十章骨架。",
+    body: "用一个画面或冲突孵化种子卡，再按作者需要规划章节或卷章。",
     icon: Sparkles,
   },
   {

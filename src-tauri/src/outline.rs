@@ -1,4 +1,7 @@
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection, OptionalExtension, Row};
+#[cfg(test)]
 use serde_json::Value;
 
 use crate::{
@@ -31,12 +34,27 @@ const SELECT: &str = "SELECT id, parent_id, level, order_no, title, goal, confli
 
 pub fn list(conn: &Connection, project_id: &str) -> AppResult<Vec<OutlineNode>> {
     let mut stmt = conn.prepare(&format!(
-        "{SELECT} WHERE project_id=?1 AND status != 'dropped' ORDER BY order_no"
+        "{SELECT} WHERE project_id=?1 AND status != 'dropped'"
     ))?;
-    let rows = stmt
+    let mut rows = stmt
         .query_map([project_id], node_from_row)?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
+    let volume_order: HashMap<String, i32> = rows
+        .iter()
+        .filter(|node| node.level == "volume")
+        .map(|node| (node.id.clone(), node.order_no))
+        .collect();
+    rows.sort_by_key(|node| {
+        let parent_order = node
+            .parent_id
+            .as_ref()
+            .and_then(|id| volume_order.get(id))
+            .copied()
+            .unwrap_or(node.order_no);
+        let rank = if node.level == "volume" { 0 } else { 1 };
+        (parent_order, rank, node.order_no)
+    });
     Ok(rows)
 }
 
@@ -58,6 +76,134 @@ pub fn has_skeleton(conn: &Connection, project_id: &str) -> AppResult<bool> {
     )?)
 }
 
+#[derive(Debug, Clone)]
+pub struct OutlineChapterDraft {
+    pub number: i32,
+    pub volume_index: Option<usize>,
+    pub title: String,
+    pub goal: String,
+    pub conflict: String,
+    pub turn: String,
+    pub payoff: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OutlineVolumeDraft {
+    pub title: String,
+    pub goal: String,
+    pub conflict: String,
+    pub turn: String,
+    pub payoff: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OutlinePlanDraft {
+    pub mode: String,
+    pub total_chapters: i32,
+    pub volumes: Vec<OutlineVolumeDraft>,
+    pub chapters: Vec<OutlineChapterDraft>,
+}
+
+/// 保存作者定义的整体结构。已确认骨架不在这里覆盖，避免静默改写正在创作的故事。
+pub fn insert_plan(
+    conn: &mut Connection,
+    project_id: &str,
+    plan: &OutlinePlanDraft,
+    branch_id: Option<&str>,
+) -> AppResult<Vec<OutlineNode>> {
+    if plan.chapters.is_empty() {
+        return Err(AppError::Message("骨架不能为空".into()));
+    }
+    let confirmed: bool = conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM outline_node
+           WHERE project_id=?1 AND level='chapter' AND status='confirmed' AND source!='import'
+         )",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    if confirmed {
+        return Err(AppError::Message(
+            "已有已确认的卷章骨架。请直接编辑现有骨架，或在新分支中建立另一套结构。".into(),
+        ));
+    }
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM outline_node WHERE project_id=?1 AND source='ai' AND status='candidate'",
+        [project_id],
+    )?;
+    let ts = now();
+    let mut volume_ids = Vec::new();
+    for (index, volume) in plan.volumes.iter().enumerate() {
+        let id = uuid::Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO outline_node
+             (id, project_id, parent_id, level, order_no, title, goal, conflict, turn, payoff,
+              status, branch_id, source, created_at, updated_at)
+             VALUES (?1,?2,NULL,'volume',?3,?4,?5,?6,?7,?8,'candidate',?9,'ai',?10,?10)",
+            params![
+                id,
+                project_id,
+                (index + 1) as i32,
+                volume.title,
+                volume.goal,
+                volume.conflict,
+                volume.turn,
+                volume.payoff,
+                branch_id,
+                ts
+            ],
+        )?;
+        volume_ids.push(id);
+    }
+    for chapter in &plan.chapters {
+        let parent_id = chapter
+            .volume_index
+            .and_then(|index| volume_ids.get(index))
+            .cloned();
+        tx.execute(
+            "INSERT INTO outline_node
+             (id, project_id, parent_id, level, order_no, title, goal, conflict, turn, payoff,
+              status, branch_id, source, created_at, updated_at)
+             VALUES (?1,?2,?3,'chapter',?4,?5,?6,?7,?8,?9,'candidate',?10,'ai',?11,?11)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                project_id,
+                parent_id,
+                chapter.number,
+                chapter.title,
+                chapter.goal,
+                chapter.conflict,
+                chapter.turn,
+                chapter.payoff,
+                branch_id,
+                ts
+            ],
+        )?;
+    }
+    tx.execute(
+        "INSERT INTO story_structure (project_id, mode, total_chapters, spec, updated_at)
+         VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(project_id) DO UPDATE SET mode=excluded.mode,
+           total_chapters=excluded.total_chapters, spec=excluded.spec, updated_at=excluded.updated_at",
+        params![
+            project_id,
+            plan.mode,
+            plan.total_chapters,
+            serde_json::json!({
+                "volumes": plan.volumes.iter().map(|volume| {
+                    serde_json::json!({"title": volume.title})
+                }).collect::<Vec<_>>()
+            })
+            .to_string(),
+            ts
+        ],
+    )?;
+    tx.commit()?;
+    list(conn, project_id)
+}
+
+#[cfg(test)]
 pub fn insert_generated(
     conn: &mut Connection,
     project_id: &str,
@@ -96,9 +242,13 @@ pub fn insert_generated(
                 order,
                 title,
                 item.get("goal").and_then(Value::as_str).unwrap_or_default(),
-                item.get("conflict").and_then(Value::as_str).unwrap_or_default(),
+                item.get("conflict")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
                 item.get("turn").and_then(Value::as_str).unwrap_or_default(),
-                item.get("payoff").and_then(Value::as_str).unwrap_or_default(),
+                item.get("payoff")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
                 branch_id,
                 ts
             ],
@@ -140,13 +290,62 @@ pub fn update(
 }
 
 /// 确认骨架节点，并同步建立章节行；重复确认不会产生重复章节。
-pub fn confirm(conn: &mut Connection, project_id: &str, ids: &[String]) -> AppResult<Vec<OutlineNode>> {
+pub fn confirm(
+    conn: &mut Connection,
+    project_id: &str,
+    ids: &[String],
+) -> AppResult<Vec<OutlineNode>> {
     if ids.is_empty() {
         return Err(AppError::Message("请选择要确认的章节".into()));
     }
     let tx = conn.transaction()?;
     let ts = now();
+    let mut target_ids = HashSet::new();
     for id in ids {
+        let node: OutlineNode = tx
+            .query_row(
+                &format!("{SELECT} WHERE project_id=?1 AND id=?2"),
+                params![project_id, id],
+                node_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| AppError::Message("找不到骨架节点".into()))?;
+        if node.level == "volume" {
+            target_ids.insert(node.id.clone());
+            let mut stmt = tx.prepare(
+                "SELECT id FROM outline_node WHERE project_id=?1 AND parent_id=?2 AND status!='dropped'",
+            )?;
+            for child in
+                stmt.query_map(params![project_id, node.id], |row| row.get::<_, String>(0))?
+            {
+                target_ids.insert(child?);
+            }
+        } else {
+            if let Some(parent_id) = node.parent_id.clone() {
+                target_ids.insert(parent_id);
+            }
+            target_ids.insert(node.id.clone());
+        }
+    }
+    let mut ordered = target_ids.into_iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|id| {
+        get(&tx, project_id, id)
+            .map(|node| {
+                let parent = node
+                    .parent_id
+                    .as_ref()
+                    .and_then(|parent_id| get(&tx, project_id, parent_id).ok())
+                    .map(|parent| parent.order_no)
+                    .unwrap_or(node.order_no);
+                (
+                    parent,
+                    if node.level == "volume" { 0 } else { 1 },
+                    node.order_no,
+                )
+            })
+            .unwrap_or((i32::MAX, 2, i32::MAX))
+    });
+    for id in &ordered {
         let node: OutlineNode = tx
             .query_row(
                 &format!("{SELECT} WHERE project_id=?1 AND id=?2"),
@@ -162,6 +361,9 @@ pub fn confirm(conn: &mut Connection, project_id: &str, ids: &[String]) -> AppRe
             "UPDATE outline_node SET status='confirmed', updated_at=?3 WHERE project_id=?1 AND id=?2",
             params![project_id, id, ts],
         )?;
+        if node.level == "volume" {
+            continue;
+        }
         let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM chapter WHERE project_id=?1 AND number=?2)",
             params![project_id, node.order_no],
@@ -169,20 +371,23 @@ pub fn confirm(conn: &mut Connection, project_id: &str, ids: &[String]) -> AppRe
         )?;
         if !exists {
             tx.execute(
-                "INSERT INTO chapter (id, project_id, number, title, status, style_epoch, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,'planned',1,?5,?5)",
+                "INSERT INTO chapter
+                 (id, project_id, number, volume_id, title, status, style_epoch, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,'planned',1,?6,?6)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     project_id,
                     node.order_no,
+                    node.parent_id,
                     node.title,
                     ts
                 ],
             )?;
         } else {
             tx.execute(
-                "UPDATE chapter SET title=?3, updated_at=?4 WHERE project_id=?1 AND number=?2 AND status='planned'",
-                params![project_id, node.order_no, node.title, ts],
+                "UPDATE chapter SET title=?3, volume_id=?4, updated_at=?5
+                 WHERE project_id=?1 AND number=?2 AND status='planned'",
+                params![project_id, node.order_no, node.title, node.parent_id, ts],
             )?;
         }
     }
@@ -251,6 +456,77 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM chapter", [], |r| r.get(0))
             .unwrap();
         assert_eq!(chapters, 2);
+        assert_eq!(confirmed_count(&loaded.conn, &pid).unwrap(), 2);
+    }
+
+    #[test]
+    fn volume_plan_confirms_nested_chapters_and_keeps_volume_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut loaded = project::create(&crate::domain::CreateProjectInput {
+            name: "t".into(),
+            root_path: dir.path().join("p").to_string_lossy().into_owned(),
+            mode: "idea".into(),
+            writing_language: None,
+        })
+        .unwrap();
+        let pid = loaded.summary.id.clone();
+        let plan = OutlinePlanDraft {
+            mode: "volumes".into(),
+            total_chapters: 3,
+            volumes: vec![
+                OutlineVolumeDraft {
+                    title: "第一卷".into(),
+                    goal: "进入禁墟".into(),
+                    conflict: "残缺契约".into(),
+                    turn: "禁墟主动回应".into(),
+                    payoff: "留下神道徽记".into(),
+                },
+                OutlineVolumeDraft {
+                    title: "第二卷".into(),
+                    goal: "追查神道".into(),
+                    conflict: "旧盟友背叛".into(),
+                    turn: "灾厄并非敌人".into(),
+                    payoff: "开启下一次灾厄潮".into(),
+                },
+            ],
+            chapters: vec![
+                OutlineChapterDraft {
+                    number: 1,
+                    volume_index: Some(0),
+                    title: "雨墟".into(),
+                    goal: "找到入口".into(),
+                    conflict: "雨势吞没道路".into(),
+                    turn: "入口在灯下".into(),
+                    payoff: "旧灯".into(),
+                },
+                OutlineChapterDraft {
+                    number: 2,
+                    volume_index: Some(0),
+                    title: "无字契".into(),
+                    goal: "读懂契约".into(),
+                    conflict: "文字会消失".into(),
+                    turn: "契约认主".into(),
+                    payoff: "禁墟核心".into(),
+                },
+                OutlineChapterDraft {
+                    number: 3,
+                    volume_index: Some(1),
+                    title: "神道回声".into(),
+                    goal: "确认神道来源".into(),
+                    conflict: "记忆被篡改".into(),
+                    turn: "灾厄曾是守门人".into(),
+                    payoff: "旧盟友".into(),
+                },
+            ],
+        };
+        let nodes = insert_plan(&mut loaded.conn, &pid, &plan, None).unwrap();
+        let first_volume = nodes.iter().find(|node| node.title == "第一卷").unwrap();
+        confirm(&mut loaded.conn, &pid, &[first_volume.id.clone()]).unwrap();
+        let chapters = crate::scenes::chapters(&loaded.conn, &pid).unwrap();
+        assert_eq!(chapters.len(), 2);
+        assert!(chapters
+            .iter()
+            .all(|chapter| chapter.volume_title.as_deref() == Some("第一卷")));
         assert_eq!(confirmed_count(&loaded.conn, &pid).unwrap(), 2);
     }
 }

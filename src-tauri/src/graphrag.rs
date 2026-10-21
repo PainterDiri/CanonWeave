@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use petgraph::graph::{NodeIndex, UnGraph};
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::{
     domain::{
@@ -115,6 +115,27 @@ fn community_sources(conn: &Connection, project_id: &str, members: &[String]) ->
         sources.push(member.clone());
         let name = entity_name(conn, project_id, member)?;
         lines.push(format!("- 实体：{name}"));
+        if let Some((domain, summary, fields)) = conn
+            .query_row(
+                "SELECT d.name, e.summary, e.fields
+                 FROM knowledge_entry e JOIN knowledge_domain d ON d.id=e.domain_id
+                 WHERE e.project_id=?1 AND e.entity_id=?2",
+                params![project_id, member],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            sources.push(format!("knowledge:{member}"));
+            lines.push(format!(
+                "  知识域：{domain}｜{summary}｜字段：{fields}"
+            ));
+        }
         let mut stmt = conn.prepare(
             "SELECT id, subject, predicate, object, source_span FROM claim
              WHERE project_id=?1 AND status='confirmed' AND (subject_id=?2 OR object_entity_id=?2) LIMIT 8",

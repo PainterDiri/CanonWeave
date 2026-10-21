@@ -30,6 +30,7 @@ pub struct ProjectCounts {
     pub pending_candidates: i32,
     pub chapters: i32,
     pub entities: i32,
+    pub knowledge_entries: i32,
     pub open_issues: i32,
     pub promises: i32,
 }

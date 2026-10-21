@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct ChapterRecord {
     pub id: String,
     pub number: i32,
+    pub volume_id: Option<String>,
+    pub volume_title: Option<String>,
     pub title: String,
     pub status: String,
     pub current_revision_id: Option<String>,

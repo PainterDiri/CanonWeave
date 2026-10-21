@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "init", include_str!("../../migrations/001_init.sql")),
@@ -27,6 +27,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         5,
         "m5_compiler",
         include_str!("../../migrations/005_m5_compiler.sql"),
+    ),
+    (
+        6,
+        "structure_knowledge",
+        include_str!("../../migrations/006_structure_knowledge.sql"),
     ),
 ];
 

@@ -12,11 +12,10 @@ import {
 import { Badge, Button, SectionTitle, Textarea } from "@/components/ui";
 import { ipc, type Premise } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
-import { ChatWorkspace } from "./ChatWorkspace";
 import { OutlinePanel } from "./OutlinePanel";
 import { PremiseEditor } from "./PremiseEditor";
 
-type Tab = "seed" | "chat" | "outline";
+type Tab = "seed" | "outline";
 
 const samples = [
   "一个只能在雨夜出现的旧车站，和一张写着明天日期的车票。",
@@ -35,6 +34,7 @@ export function SeedPage() {
   const [editing, setEditing] = useState<Premise | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const refreshProject = useAppStore((s) => s.refreshProject);
+  const setNav = useAppStore((s) => s.setNav);
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +94,7 @@ export function SeedPage() {
     <div className="fade-in mx-auto max-w-[1180px] px-8 py-7">
       <SectionTitle
         eyebrow="Seed · 孵化"
-        title="灵感与故事骨架"
+        title="灵感与卷章"
         action={
           active ? (
             <Badge tone="teal">{active.genre || "已确认种子卡"}</Badge>
@@ -107,8 +107,7 @@ export function SeedPage() {
       <div className="mb-5 flex items-center gap-1 border-b border-line">
         {[
           { key: "seed" as const, label: "种子卡", icon: Sparkles },
-          { key: "chat" as const, label: "创作对话", icon: MessageSquareText },
-          { key: "outline" as const, label: "十章骨架", icon: Wand2 },
+          { key: "outline" as const, label: "卷章规划", icon: Wand2 },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -231,7 +230,7 @@ export function SeedPage() {
                       setEditing(premise);
                       setEditorOpen(true);
                     }}
-                    onAsk={() => setTab("chat")}
+                    onAsk={() => setNav("agent")}
                   />
                 ))}
               </div>
@@ -255,7 +254,6 @@ export function SeedPage() {
         </div>
       ) : null}
 
-      {!loading && tab === "chat" ? <ChatWorkspace premise={active} /> : null}
       {!loading && tab === "outline" ? (
         <OutlinePanel hasPremise={Boolean(active)} onSwitchToSeed={() => setTab("seed")} />
       ) : null}
@@ -361,7 +359,7 @@ function ConfirmedCard({
             编辑种子卡
           </Button>
           <Button size="sm" tone="primary" onClick={onOutline} icon={<ArrowRight size={12} />}>
-            十章骨架
+            规划卷章
           </Button>
         </div>
       </div>

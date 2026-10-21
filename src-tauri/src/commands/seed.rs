@@ -8,7 +8,10 @@ use crate::{
         SeedGenerateResult,
     },
     error::{AppError, IpcResult},
-    llm::{parse_json_loose, seed_system_prompt, seed_user_prompt, ChatTurn, LlmClient},
+    llm::{
+        parse_json_loose, seed_compact_system_prompt, seed_system_prompt, seed_user_prompt,
+        ChatTurn, LlmClient,
+    },
     model, seed,
     state::AppState,
 };
@@ -19,6 +22,56 @@ fn client(state: &AppState) -> Result<LlmClient, String> {
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "尚未保存 API Key，请先在设置中填写并测试连接".to_string())?;
     LlmClient::new(&config, key).map_err(|e| e.to_string())
+}
+
+async fn generate_directions(client: &LlmClient, logline: &str) -> Result<String, String> {
+    let budget = client.max_tokens.max(4096);
+    let first = client
+        .complete_with_meta(
+            &[
+                ChatTurn::system(seed_system_prompt()),
+                ChatTurn::user(seed_user_prompt(logline)),
+            ],
+            Some(budget),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    if !first.truncated {
+        if let Ok(directions) = parse_json_loose::<Vec<Value>>(&first.text) {
+            if directions.len() >= 3 {
+                return Ok(first.text);
+            }
+        }
+    }
+
+    let second = client
+        .complete_with_meta(
+            &[
+                ChatTurn::system(seed_compact_system_prompt()),
+                ChatTurn::user(format!(
+                    "作者灵感：\n{logline}\n\n请只输出 3 项精简 JSON，确保数组完整闭合。"
+                )),
+            ],
+            Some(budget),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    if second.truncated {
+        return Err(format!(
+            "模型输出在 JSON 完成前达到 token 上限（{}）。已自动尝试精简重试；请在设置中提高 Max tokens，或换用支持更长输出的模型。",
+            second.finish_reason.as_deref().unwrap_or("length")
+        ));
+    }
+    let directions = parse_json_loose::<Vec<Value>>(&second.text).map_err(|error| {
+        format!("模型两次都没有返回完整的三种走向。请重试或换用更稳定的模型。原始错误：{error}")
+    })?;
+    if directions.len() < 3 {
+        return Err(format!(
+            "模型只返回了 {} 个完整走向，请重试或换用更稳定的模型",
+            directions.len()
+        ));
+    }
+    Ok(second.text)
 }
 
 #[tauri::command]
@@ -35,7 +88,8 @@ pub async fn seed_generate(
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let sessions = chat::list(&loaded.conn, &pid, Some("seed"), false).map_err(|e| e.to_string())?;
+        let sessions =
+            chat::list(&loaded.conn, &pid, Some("seed"), false).map_err(|e| e.to_string())?;
         let session = match sessions.into_iter().next() {
             Some(session) => session,
             None => chat::create(
@@ -64,16 +118,7 @@ pub async fn seed_generate(
         (pid, session.id, message.id)
     };
 
-    let raw = client
-        .complete(
-            &[
-                ChatTurn::system(seed_system_prompt()),
-                ChatTurn::user(seed_user_prompt(input.logline.trim())),
-            ],
-            Some(4096),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    let raw = generate_directions(&client, input.logline.trim()).await?;
     let directions: Vec<Value> = parse_json_loose(&raw).map_err(|e| e.to_string())?;
 
     let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;

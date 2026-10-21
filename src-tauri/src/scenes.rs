@@ -10,22 +10,26 @@ use crate::{
 
 pub fn chapters(conn: &Connection, project_id: &str) -> AppResult<Vec<ChapterRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.number, c.title, c.status, c.current_revision_id, c.style_profile_id,
-            c.style_epoch, (SELECT COUNT(*) FROM scene s WHERE s.chapter_id=c.id), c.updated_at
-         FROM chapter c WHERE c.project_id=?1 ORDER BY c.number",
+        "SELECT c.id, c.number, c.volume_id, v.title, c.title, c.status, c.current_revision_id,
+            c.style_profile_id, c.style_epoch,
+            (SELECT COUNT(*) FROM scene s WHERE s.chapter_id=c.id), c.updated_at
+         FROM chapter c LEFT JOIN outline_node v ON v.id=c.volume_id
+         WHERE c.project_id=?1 ORDER BY c.number",
     )?;
     let rows = stmt
         .query_map([project_id], |row| {
             Ok(ChapterRecord {
                 id: row.get(0)?,
                 number: row.get(1)?,
-                title: row.get(2)?,
-                status: row.get(3)?,
-                current_revision_id: row.get(4)?,
-                style_profile_id: row.get(5)?,
-                style_epoch: row.get(6)?,
-                scene_count: row.get(7)?,
-                updated_at: row.get(8)?,
+                volume_id: row.get(2)?,
+                volume_title: row.get(3)?,
+                title: row.get(4)?,
+                status: row.get(5)?,
+                current_revision_id: row.get(6)?,
+                style_profile_id: row.get(7)?,
+                style_epoch: row.get(8)?,
+                scene_count: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

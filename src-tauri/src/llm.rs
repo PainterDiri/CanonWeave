@@ -53,6 +53,13 @@ pub struct LlmClient {
     pub max_tokens: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompletionOutput {
+    pub text: String,
+    pub finish_reason: Option<String>,
+    pub truncated: bool,
+}
+
 impl LlmClient {
     pub fn new(config: &ModelConfig, api_key: String) -> AppResult<Self> {
         let http = reqwest::Client::builder()
@@ -70,7 +77,26 @@ impl LlmClient {
         })
     }
 
-    pub async fn complete(&self, messages: &[ChatTurn], max_tokens: Option<i32>) -> AppResult<String> {
+    pub async fn complete(
+        &self,
+        messages: &[ChatTurn],
+        max_tokens: Option<i32>,
+    ) -> AppResult<String> {
+        let output = self.complete_with_meta(messages, max_tokens).await?;
+        if output.truncated {
+            return Err(AppError::Message(format!(
+                "模型输出达到 max_tokens 上限（{}），结果不完整。请重试或提高 Max tokens。",
+                output.finish_reason.as_deref().unwrap_or("length")
+            )));
+        }
+        Ok(output.text)
+    }
+
+    pub async fn complete_with_meta(
+        &self,
+        messages: &[ChatTurn],
+        max_tokens: Option<i32>,
+    ) -> AppResult<CompletionOutput> {
         let response = self
             .http
             .post(&self.base_url)
@@ -96,13 +122,7 @@ impl LlmClient {
                 body.chars().take(400).collect::<String>()
             )));
         }
-        let value: Value = serde_json::from_str(&body)
-            .map_err(|e| AppError::Message(format!("模型响应不是合法 JSON：{e}")))?;
-        value
-            .pointer("/choices/0/message/content")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .ok_or_else(|| AppError::Message("模型响应缺少 choices[0].message.content".into()))
+        parse_completion_body(&body)
     }
 
     pub async fn stream<F>(
@@ -168,6 +188,29 @@ impl LlmClient {
     }
 }
 
+pub fn parse_completion_body(body: &str) -> AppResult<CompletionOutput> {
+    let value: Value = serde_json::from_str(body)
+        .map_err(|e| AppError::Message(format!("模型响应不是合法 JSON：{e}")))?;
+    let text = value
+        .pointer("/choices/0/message/content")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| AppError::Message("模型响应缺少 choices[0].message.content".into()))?;
+    let finish_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let truncated = matches!(
+        finish_reason.as_deref(),
+        Some("length") | Some("max_tokens")
+    );
+    Ok(CompletionOutput {
+        text,
+        finish_reason,
+        truncated,
+    })
+}
+
 /// 解析一行 SSE；返回正文增量。会忽略 `[DONE]`、注释与无法解析的事件。
 pub fn parse_sse_data(line: &str) -> Option<String> {
     let data = line.strip_prefix("data:")?.trim();
@@ -215,25 +258,17 @@ pub fn seed_system_prompt() -> String {
 1. 三种走向的主角欲望、阻力来源和叙事承诺必须不同，不要只是换措辞。
 2. 每种走向必须具体到“谁想要什么、什么在阻止、代价是什么”，避免抽象主题词。
 3. 只输出 JSON 数组，不要解释，不要 Markdown 代码块。
-4. 每项字段：
+4. 每项只输出以下精简字段，不要附加解释或重复内容：
    {
      "logline": "一句话故事",
      "genre": "类型",
-     "subgenre": "子类型",
      "theme": "核心命题",
-     "emotional_promise": "读者应获得的情绪体验",
      "tone": "情绪基调",
      "core_conflict": "谁想要什么、什么在阻止、代价是什么",
      "protagonist_desire": "主角想要什么",
      "flaw": "主角缺陷",
-     "secret": "主角秘密或隐藏信息",
-     "world_hook": ["1-3 条世界规则钩子"],
+     "world_hook": ["1-2 条世界规则钩子"],
      "pov": "叙事视角",
-     "person": "人称",
-     "tense": "时态",
-     "target_length": "目标篇幅",
-     "update_rhythm": "更新节奏",
-     "ending_intent": "HE/BE/开放/未定",
      "taboo": ["应避免的写法"]
    }
 5. 所有文本使用中文。"#
@@ -244,18 +279,54 @@ pub fn seed_user_prompt(logline: &str) -> String {
     format!("作者的一句话或灵感：\n{logline}\n\n请给出三种走向。")
 }
 
-pub fn outline_system_prompt() -> String {
-    r#"你是长篇小说的结构编辑。请基于已确认的种子卡生成十章骨架。
-每章必须回答：目标（这一章改变什么）、冲突（谁阻止、代价是什么）、转折（如何打破预期）、兑现（回收或新增哪条伏笔）。
-十章应形成一条可写的主线，前 3 章能直接开写，不要平均分配情节。
-只输出 JSON 数组，不要 Markdown 代码块。每项字段：
-{"order": 1, "title": "章名", "goal": "章节目标", "conflict": "冲突", "turn": "转折", "payoff": "伏笔操作"}
-必须正好 10 项，order 从 1 到 10。所有文本使用中文。"#
+pub fn seed_compact_system_prompt() -> String {
+    r#"你是中文长篇小说策划。根据作者灵感给出 3 个差异明显的长篇走向。
+只输出一个合法 JSON 数组，不要 Markdown、解释、前后缀或省略号。
+必须完整闭合数组和全部对象。每项只包含：
+{"logline":"一句话故事","genre":"类型","theme":"核心命题","tone":"情绪基调","core_conflict":"谁想要什么、什么在阻止、代价是什么","protagonist_desire":"主角欲望","flaw":"主角缺陷","world_hook":["世界规则"],"pov":"叙事视角","taboo":["应避免的写法"]}
+三个走向的主角欲望、阻力和叙事承诺必须不同。每项文本精简，确保数组完整。使用中文。"#
         .into()
 }
 
-pub fn outline_user_prompt(premise: &Value) -> String {
-    format!("已确认的种子卡：\n{premise}\n\n请生成十章骨架。")
+pub fn outline_volume_system_prompt() -> String {
+    r#"你是长篇小说的结构编辑。作者已经确定卷数和每卷章节数，你只负责规划每一卷的叙事功能。
+卷与卷之间必须形成递进：目标升级、代价升级、世界揭示扩大，不能把同一冲突重复换皮。
+只输出 JSON 数组，不要 Markdown。数组长度必须与作者给出的卷数完全一致。每项字段：
+{"index":1,"title":"卷名","goal":"本卷目标","conflict":"本卷核心阻力","turn":"本卷最关键转折","payoff":"本卷收束与下一卷钩子"}
+作者已经填写卷名时必须沿用，不得改名。所有文本使用中文。"#
+        .into()
+}
+
+pub fn outline_volume_user_prompt(premise: &Value, volume_requests: &str) -> String {
+    format!(
+        "已确认的种子卡：\n{premise}\n\n作者定义的分卷结构：\n{volume_requests}\n\n请为每一卷生成卷级骨架。"
+    )
+}
+
+pub fn outline_chapter_system_prompt() -> String {
+    r#"你是长篇小说的章节结构编辑。按照作者定义的总篇幅和当前批次范围生成章节骨架。
+每一章必须回答：目标、冲突、转折、兑现（回收或新增哪条伏笔）。相邻章节要推进因果，不平均分配情节。
+本批次的 number 必须连续，数量和范围以用户要求为准。只输出 JSON 数组，不要 Markdown。每项字段：
+{"number":1,"title":"章名","goal":"本章目标","conflict":"本章冲突","turn":"本章转折","payoff":"伏笔操作"}
+不得提前写出后续批次没有要求的章节。所有文本使用中文。"#
+        .into()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn outline_chapter_user_prompt(
+    premise: &Value,
+    structure_context: &str,
+    volume_context: &str,
+    start: i32,
+    end: i32,
+    previous_context: &str,
+) -> String {
+    format!(
+        "已确认的种子卡：\n{premise}\n\n全书结构：\n{structure_context}\n\n当前卷：\n{volume_context}\n\n\
+         本批次要求生成第 {start} 章至第 {end} 章，共 {} 章。\
+         前一章或前一批次摘要：\n{previous_context}\n\n只返回本批次章节。",
+        end - start + 1
+    )
 }
 
 pub fn extraction_system_prompt() -> String {
@@ -293,16 +364,19 @@ pub fn chat_system_prompt(mode: &str, premise: Option<&Value>, constraints: &[St
         _ => "你在帮助作者发散故事方向。可以提出大胆假设，但必须标明哪些是建议、尚未确认。",
     };
     let mut prompt = format!(
-        r#"你是 CanonWeave 的创作对话助手。{mode_rule}
+        r#"你是 CanonWeave 的叙事任务助手。{mode_rule}
 
 边界：
 - 你输出的任何设定都只是建议，只有作者“采纳为候选”并确认后才成为正式事实。
 - 不要把建议写成既成事实；区分「建议」与「已确认」。
 - 不要替作者决定审美判断，不要自动发布内容。
+- 面对多步骤请求时，先给出简短任务计划，再执行当前回复能完成的部分。
 - 回答使用中文，简洁具体。"#
     );
     if let Some(premise) = premise {
-        prompt.push_str(&format!("\n\n已确认种子卡（创作契约，不是世界事实）：\n{premise}"));
+        prompt.push_str(&format!(
+            "\n\n已确认种子卡（创作契约，不是世界事实）：\n{premise}"
+        ));
     }
     if !constraints.is_empty() {
         prompt.push_str("\n\n作者固定的会话决定（进入任务契约，不是世界事实）：\n");
@@ -332,5 +406,13 @@ mod tests {
         let raw = "好的，如下：\n```json\n{\"a\": 1}\n```\n";
         let value: Value = parse_json_loose(raw).unwrap();
         assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn detects_truncated_completion_from_finish_reason() {
+        let body = r#"{"choices":[{"message":{"content":"[{\"logline\":\"A\"}"},"finish_reason":"length"}]}"#;
+        let output = parse_completion_body(body).unwrap();
+        assert!(output.truncated);
+        assert_eq!(output.finish_reason.as_deref(), Some("length"));
     }
 }

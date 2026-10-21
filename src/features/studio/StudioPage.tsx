@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   Check,
   LoaderCircle,
+  Layers3,
   Pencil,
   Play,
   Plus,
@@ -96,6 +97,7 @@ export function StudioPage() {
   const [styleOverride, setStyleOverride] = useState("");
   const [generationMode, setGenerationMode] = useState<"quick" | "refined">("quick");
   const [centerTab, setCenterTab] = useState<"generate" | "chapter">("generate");
+  const [showScenes, setShowScenes] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,7 +200,7 @@ export function StudioPage() {
 
   const generate = async () => {
     if (!currentScene) {
-      setError("请先建立场景契约");
+      setError("请先建立本章写作任务");
       return;
     }
     setBusy(true);
@@ -249,7 +251,7 @@ export function StudioPage() {
   const checkStyle = async () => {
     const profileId = styleOverride || currentScene?.styleProfileId || styles[0]?.id;
     if (!output || !currentScene) {
-      setError("需要先有正文和场景契约");
+      setError("需要先有正文和本章写作任务");
       return;
     }
     setBusy(true);
@@ -326,6 +328,7 @@ export function StudioPage() {
   const openNewScene = () =>
     setSceneForm({
       ...emptyScene,
+      goal: currentChapter?.title ?? "",
       styleProfileId: styles.find((style) => style.scope === "project")?.id ?? "",
     });
 
@@ -399,7 +402,7 @@ export function StudioPage() {
         <EmptyState
           icon={<BookOpen size={20} />}
           title="还没有可写的章节"
-          description="先在灵感页生成并确认章节骨架，前三章确认后就可以建立第一场场景契约。"
+          description="先在卷章规划中建立并确认章节。正文默认按章写作，只有需要多地点、多视角或多时间点时再拆分场次。"
         />
       </div>
     );
@@ -414,6 +417,14 @@ export function StudioPage() {
           <div className="flex items-center gap-2">
             <Badge tone="teal">{generationMode === "refined" ? "精修模式" : "快速模式"}</Badge>
             {currentChapter?.currentRevisionId ? <Badge tone="neutral">已有版本</Badge> : null}
+            <Button
+              size="sm"
+              tone="ghost"
+              onClick={() => setShowScenes((value) => !value)}
+              icon={<Layers3 size={12} />}
+            >
+              {showScenes ? "收起分场" : "分场编辑"}
+            </Button>
           </div>
         }
       />
@@ -425,54 +436,69 @@ export function StudioPage() {
       <div className="grid grid-cols-[260px_minmax(0,1fr)] gap-4">
         <aside className="paper-card flex h-[680px] min-h-0 flex-col overflow-hidden">
           <div className="border-b border-line px-3.5 py-2.5 text-[11px] font-semibold text-ink-soft">
-            章节与场景
+            章节
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            {chapters.map((chapter) => (
-              <div key={chapter.id} className="mb-1">
-                <button
-                  onClick={() => void selectChapter(chapter.id)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
-                    chapterId === chapter.id ? "bg-teal-soft/70" : "hover:bg-ink/[0.03]"
-                  }`}
-                >
-                  <span className="w-5 text-[9.5px] text-muted">{chapter.number}</span>
-                  <span className="flex-1 truncate text-[11.5px] font-medium text-ink">
-                    {chapter.title}
-                  </span>
-                  <span className="text-[9px] text-muted">{chapter.sceneCount} 场</span>
-                </button>
-                {chapterId === chapter.id ? (
-                  <div className="ml-4 mt-1 space-y-0.5 border-l border-line pl-2">
-                    {scenes.map((scene) => (
-                      <button
-                        key={scene.id}
-                        onClick={() => {
-                          setSceneId(scene.id);
-                          setCenterTab("generate");
-                        }}
-                        className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[10.5px] transition ${
-                          sceneId === scene.id
-                            ? "bg-paper text-teal"
-                            : "text-muted hover:bg-ink/[0.03] hover:text-ink"
-                        }`}
-                      >
-                        <span className="h-1 w-1 rounded-full bg-current opacity-50" />
-                        <span className="truncate">
-                          第 {scene.number} 场 · {scene.goal || "未命名"}
-                        </span>
-                      </button>
-                    ))}
+            {chapters.map((chapter, index) => {
+              const previous = chapters[index - 1];
+              const newVolume =
+                Boolean(chapter.volumeTitle) &&
+                chapter.volumeId !== previous?.volumeId;
+              return (
+                <Fragment key={chapter.id}>
+                  {newVolume ? (
+                    <div className="mb-1 mt-3 px-2.5 text-[9px] font-semibold tracking-[0.14em] text-muted first:mt-0">
+                      {chapter.volumeTitle}
+                    </div>
+                  ) : null}
+                  <div className="mb-1">
                     <button
-                      onClick={openNewScene}
-                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] text-teal/70 hover:bg-teal-soft/40"
+                      onClick={() => void selectChapter(chapter.id)}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                        chapterId === chapter.id ? "bg-teal-soft/70" : "hover:bg-ink/[0.03]"
+                      }`}
                     >
-                      <Plus size={10} /> 新建场景
+                      <span className="w-5 text-[9.5px] text-muted">{chapter.number}</span>
+                      <span className="flex-1 truncate text-[11.5px] font-medium text-ink">
+                        {chapter.title}
+                      </span>
+                      {chapter.sceneCount > 1 ? (
+                        <span className="text-[9px] text-muted">{chapter.sceneCount} 场</span>
+                      ) : null}
                     </button>
+                    {showScenes && chapterId === chapter.id ? (
+                      <div className="ml-4 mt-1 space-y-0.5 border-l border-line pl-2">
+                        {scenes.map((scene) => (
+                          <button
+                            key={scene.id}
+                            onClick={() => {
+                              setSceneId(scene.id);
+                              setCenterTab("generate");
+                            }}
+                            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[10.5px] transition ${
+                              sceneId === scene.id
+                                ? "bg-paper text-teal"
+                                : "text-muted hover:bg-ink/[0.03] hover:text-ink"
+                            }`}
+                          >
+                            <span className="h-1 w-1 rounded-full bg-current opacity-50" />
+                            <span className="truncate">
+                              分场 {scene.number} · {scene.goal || "未命名"}
+                            </span>
+                          </button>
+                        ))}
+                        <button
+                          onClick={openNewScene}
+                          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] text-teal/70 hover:bg-teal-soft/40"
+                        >
+                          <Plus size={10} /> 添加分场
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            ))}
+                </Fragment>
+              );
+            })}
           </div>
         </aside>
 
@@ -500,13 +526,14 @@ export function StudioPage() {
                 </div>
                 {currentScene ? (
                   <span className="text-[10px] text-muted">
-                    第 {currentScene.number} 场 · {currentScene.status}
+                    {showScenes ? `分场 ${currentScene.number}` : "本章任务"} ·{" "}
+                    {currentScene.status}
                   </span>
                 ) : null}
               </div>
               {currentScene ? (
                 <Button size="sm" tone="ghost" onClick={() => openEditScene(currentScene)} icon={<Pencil size={11} />}>
-                  场景契约
+                  写作要点
                 </Button>
               ) : null}
             </div>
@@ -538,9 +565,11 @@ export function StudioPage() {
                     </>
                   ) : (
                     <div className="flex items-center justify-between">
-                      <span className="text-[11.5px] text-muted">本章还没有场景契约</span>
+                      <span className="text-[11.5px] text-muted">
+                        本章还未建立写作任务。人物、冲突和 POV 可以在同一条任务中完成。
+                      </span>
                       <Button size="sm" onClick={openNewScene} icon={<Plus size={11} />}>
-                        新建场景
+                        建立本章任务
                       </Button>
                     </div>
                   )}
@@ -587,9 +616,9 @@ export function StudioPage() {
                       <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-full border border-teal/20 bg-teal-soft/40 text-teal">
                         <Wand2 size={18} />
                       </div>
-                      <div className="display text-[18px] text-ink">按场景契约起草</div>
+                      <div className="display text-[18px] text-ink">建立任务后直接起草本章</div>
                       <p className="mt-2 max-w-sm text-[11px] leading-6 text-muted">
-                        系统会编译九层上下文，注入文笔契约与人物声音。生成先进入候选区，接受后才写入正文版本。
+                        场景已降为可选的分场工具。单线章节只需填写目标、冲突与 POV；系统会编译九层上下文并注入人物声音。
                       </p>
                     </div>
                   )}
@@ -610,7 +639,7 @@ export function StudioPage() {
                       onChange={(e) => setStyleOverride(e.target.value)}
                       className="h-10 max-w-[150px] rounded-[10px] border border-line-strong bg-paper-raised px-2 text-[10.5px]"
                     >
-                      <option value="">跟随场景文笔</option>
+                      <option value="">跟随本章文笔</option>
                       {styles.map((style) => (
                         <option key={style.id} value={style.id}>
                           {style.name}
@@ -733,7 +762,7 @@ export function StudioPage() {
                           ? "对话续写"
                           : refined
                             ? "精修草稿"
-                            : "场景生成"}{" "}
+                            : "章节生成"}{" "}
                         ·{" "}
                         {draft.payload.wordCount ?? "—"} 字
                       </div>
@@ -904,8 +933,8 @@ function SceneEditor({
     <Modal
       open={Boolean(form)}
       onOpenChange={(open) => !open && onClose()}
-      title={form?.id ? "编辑场景契约" : "新建场景契约"}
-      description="场景契约决定这一场改变什么。情绪节拍与感官计划会进入上下文和文笔检查。"
+      title={form?.id ? "编辑写作任务" : "建立本章写作任务"}
+      description="单线章节按章填写即可。需要多地点、多视角或多时间点时，再为本章添加分场。"
       width="max-w-[720px]"
       footer={
         <>
@@ -917,14 +946,14 @@ function SceneEditor({
             onClick={() => void onSave()}
             disabled={!form?.goal.trim() || !form?.conflict.trim()}
           >
-            保存场景
+            保存写作任务
           </Button>
         </>
       }
     >
       {form ? (
         <div className="space-y-3">
-          <Field label="场景目标" hint="这一场要改变什么">
+          <Field label="本章目标" hint="这一段要改变什么">
             <Textarea rows={2} value={form.goal} onChange={(e) => set("goal", e.target.value)} />
           </Field>
           <Field label="冲突" hint="谁阻止，代价是什么">

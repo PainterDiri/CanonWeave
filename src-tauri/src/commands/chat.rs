@@ -187,7 +187,7 @@ pub async fn chat_send(
     let client = super::seed::require_client(&state).map_err(|e| e.to_string())?;
     let request_id = uuid::Uuid::new_v4().to_string();
     let cancel = Arc::new(AtomicBool::new(false));
-    let (project_id, session, messages, premise) = {
+    let (project_id, session, messages, premise, project_context) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
@@ -206,8 +206,61 @@ pub async fn chat_send(
         let premise = seed::active(&loaded.conn, &pid)
             .map_err(|e| e.to_string())?
             .and_then(|p| serde_json::to_value(p).ok());
+        let knowledge_context = crate::knowledge::prompt_context(&loaded.conn, &pid, 30)
+            .map_err(|error| error.to_string())?;
+        let open_issues: i64 = loaded
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM issue WHERE project_id=?1 AND status='open'",
+                [&pid],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let pending_candidates: i64 = loaded
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM candidate WHERE project_id=?1 AND status='pending'",
+                [&pid],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let mut promise_stmt = loaded
+            .conn
+            .prepare(
+                "SELECT title, state, target_window FROM promise
+                 WHERE project_id=?1 AND state NOT IN ('paid_off','abandoned')
+                 ORDER BY updated_at DESC LIMIT 8",
+            )
+            .map_err(|error| error.to_string())?;
+        let promises = promise_stmt
+            .query_map([&pid], |row| {
+                Ok(format!(
+                    "- [{}] {}｜窗口：{}",
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(2)?
+                ))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        drop(promise_stmt);
+        let project_context = format!(
+            "待处理冲突：{open_issues}\n待确认候选：{pending_candidates}\n\
+             未结伏笔：\n{}\n作者确认的知识库：\n{}",
+            if promises.is_empty() {
+                "无".to_string()
+            } else {
+                promises.join("\n")
+            },
+            if knowledge_context.is_empty() {
+                "无".to_string()
+            } else {
+                knowledge_context
+            }
+        );
         let _ = user_message;
-        (pid, session, messages, premise)
+        (pid, session, messages, premise, project_context)
     };
     state
         .cancellations
@@ -231,6 +284,9 @@ pub async fn chat_send(
             session.summary
         )));
     }
+    turns.push(ChatTurn::system(format!(
+        "当前项目的只读快照。它帮助你定位任务，不替代原文与作者确认事实：\n{project_context}"
+    )));
     for message in &messages {
         if message.role == "user" || message.role == "assistant" {
             turns.push(ChatTurn {

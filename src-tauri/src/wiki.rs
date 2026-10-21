@@ -718,6 +718,50 @@ pub fn rebuild(conn: &mut Connection, project_id: &str) -> AppResult<WikiRebuild
     }
     {
         let mut stmt = conn.prepare(
+            "SELECT e.id, e.entity_id, d.name, e.name, e.aliases, e.summary, e.fields
+             FROM knowledge_entry e JOIN knowledge_domain d ON d.id=e.domain_id
+             WHERE e.project_id=?1 ORDER BY d.sort_order, e.name",
+        )?;
+        let rows = stmt
+            .query_map([project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        for (entry_id, entity_id, domain, name, aliases, summary, fields) in rows {
+            let aliases = json_list(&aliases);
+            let fields = serde_json::from_str::<Value>(&fields)
+                .ok()
+                .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                .unwrap_or(fields);
+            let mut page = DraftPage::new(
+                "knowledge",
+                format!("{domain} · {name}"),
+                format!(
+                    "知识域：{domain}\n\n{}\n\n别名：{}\n\n结构化字段：\n{fields}",
+                    empty_as(summary, "尚无摘要。"),
+                    if aliases.is_empty() {
+                        "无".to_string()
+                    } else {
+                        aliases.join("、")
+                    }
+                ),
+            );
+            page.entity_id = entity_id;
+            page.source(Some(&entry_id), Some(&format!("knowledge:{entry_id}")));
+            drafts.push(page.finish());
+        }
+    }
+    {
+        let mut stmt = conn.prepare(
             "SELECT id, code, description, predicate, exception_scope, constraint_layer, severity
              FROM rule WHERE project_id=?1 ORDER BY code",
         )?;

@@ -5,6 +5,7 @@ import {
   type ChatSessionCreateInput,
   type CharacterInput,
   type ModelConfig,
+  type OutlineGenerateInput,
   type OutlineUpdateInput,
   type PremiseInput,
   type PromiseInput,
@@ -22,6 +23,8 @@ import {
   type VoiceThresholdInput,
   type PromisePayoffInput,
   type ExportInput,
+  type KnowledgeDomainInput,
+  type KnowledgeEntryInput,
 } from "./bindings";
 
 export type {
@@ -31,6 +34,7 @@ export type {
   CharacterDetail,
   ModelConfig,
   OutlineNode,
+  OutlineGenerateInput,
   OutlineUpdateInput,
   Premise,
   PremiseInput,
@@ -92,6 +96,12 @@ export type {
   MotifHint,
   ExportInput,
   ExportResult,
+  KnowledgeDomain,
+  KnowledgeDomainInput,
+  KnowledgeEntry,
+  KnowledgeEntryInput,
+  KnowledgeField,
+  VolumePlanInput,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -215,7 +225,8 @@ export const ipc = {
     guarded(async () => unwrap(await commands.chatCandidates(sessionId))),
 
   outlineList: () => guarded(async () => unwrap(await commands.outlineList())),
-  outlineGenerate: () => guarded(async () => unwrap(await commands.outlineGenerate())),
+  outlineGenerate: (input: OutlineGenerateInput) =>
+    guarded(async () => unwrap(await commands.outlineGenerate(input))),
   outlineUpdate: (input: OutlineUpdateInput) =>
     guarded(async () => unwrap(await commands.outlineUpdate(input))),
   outlineConfirm: (ids: string[]) =>
@@ -244,6 +255,14 @@ export const ipc = {
   characterList: () => guarded(async () => unwrap(await commands.characterList())),
   characterSave: (input: CharacterInput) =>
     guarded(async () => unwrap(await commands.characterSave(input))),
+
+  knowledgeDomains: () => guarded(async () => unwrap(await commands.knowledgeDomains())),
+  knowledgeDomainCreate: (input: KnowledgeDomainInput) =>
+    guarded(async () => unwrap(await commands.knowledgeDomainCreate(input))),
+  knowledgeEntries: (domainId: string | null) =>
+    guarded(async () => unwrap(await commands.knowledgeEntries(domainId))),
+  knowledgeEntrySave: (input: KnowledgeEntryInput) =>
+    guarded(async () => unwrap(await commands.knowledgeEntrySave(input))),
 
   promiseList: () => guarded(async () => unwrap(await commands.promiseList())),
   promiseSave: (input: PromiseInput) =>

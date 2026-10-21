@@ -5,6 +5,7 @@ pub mod types_m2;
 pub mod types_m3;
 pub mod types_m4;
 pub mod types_m5;
+pub mod types_m6;
 
 pub use types::*;
 pub use types_m1::*;
@@ -13,3 +14,4 @@ pub use types_m2::*;
 pub use types_m3::*;
 pub use types_m4::*;
 pub use types_m5::*;
+pub use types_m6::*;

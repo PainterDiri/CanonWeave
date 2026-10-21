@@ -4,13 +4,15 @@ import { ipc, type ModelConfig, type ProjectSnapshot } from "@/lib/ipc";
 export type WorkspaceMode = "seed" | "studio" | "map" | "audit";
 export type NavKey =
   | "overview"
+  | "studio"
+  | "agent"
   | "seed"
   | "canon"
   | "characters"
+  | "knowledge"
   | "timeline"
   | "promises"
   | "wiki"
-  | "studio"
   | "audit";
 
 type AppStore = {

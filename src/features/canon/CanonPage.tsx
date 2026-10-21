@@ -240,6 +240,7 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
   const setModel = useAppStore((s) => s.setModel);
   const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "https://api.openai.com/v1");
   const [modelName, setModelName] = useState(model?.model ?? "gpt-4o-mini");
+  const [maxTokens, setMaxTokens] = useState(model?.maxTokens ?? 4096);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -251,7 +252,7 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
         baseUrl,
         model: modelName,
         temperature: model?.temperature ?? 0.8,
-        maxTokens: model?.maxTokens ?? 4096,
+        maxTokens,
         embeddingModel: model?.embeddingModel ?? null,
         apiKey: apiKey.trim() || null,
       });
@@ -297,6 +298,15 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
         </Field>
         <Field label="模型名">
           <Input value={modelName} onChange={(e) => setModelName(e.target.value)} />
+        </Field>
+        <Field label="Max tokens" hint="结构化生成建议至少 4096">
+          <Input
+            type="number"
+            min={64}
+            max={200000}
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(Number(e.target.value))}
+          />
         </Field>
       </div>
       <div className="mt-3">

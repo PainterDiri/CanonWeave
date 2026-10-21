@@ -41,7 +41,13 @@ const captureKinds = [
   { key: "style_sample", label: "文笔样本" },
 ];
 
-export function ChatWorkspace({ premise }: { premise: Premise | null }) {
+export function ChatWorkspace({
+  premise,
+  surface = "seed",
+}: {
+  premise: Premise | null;
+  surface?: "seed" | "agent";
+}) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [active, setActive] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -92,9 +98,9 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
         let first = list[0];
         if (!first) {
           first = await ipc.chatCreate({
-            scope: "seed",
-            mode: "diverge",
-            title: "灵感孵化",
+            scope: surface === "agent" ? "lookup" : "seed",
+            mode: surface === "agent" ? "structure" : "diverge",
+            title: surface === "agent" ? "协作任务" : "灵感孵化",
             sceneId: null,
             branchId: null,
             parentSessionId: null,
@@ -108,7 +114,7 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [surface]);
 
   useEffect(() => {
     if (!active) return;
@@ -136,7 +142,14 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
 
   const newSession = async () => {
     try {
-      const scope = active?.mode === "plot" ? "plot" : active?.mode === "lookup" ? "lookup" : "seed";
+      const scope =
+        active?.mode === "plot"
+          ? "plot"
+          : active?.mode === "lookup"
+            ? "lookup"
+            : surface === "agent"
+              ? "lookup"
+              : "seed";
       const session = await ipc.chatCreate({
         scope,
         mode: active?.mode ?? "diverge",
@@ -326,11 +339,16 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
   return (
     <div
       className="grid grid-cols-[210px_minmax(0,1fr)_280px] gap-3"
-      style={{ height: "calc(100vh - 245px)", minHeight: 520 }}
+      style={{
+        height: surface === "agent" ? "calc(100vh - 318px)" : "calc(100vh - 245px)",
+        minHeight: surface === "agent" ? 490 : 520,
+      }}
     >
       <aside className="paper-card flex min-h-0 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
-          <span className="text-[11px] font-semibold tracking-wide text-ink-soft">会话</span>
+          <span className="text-[11px] font-semibold tracking-wide text-ink-soft">
+            {surface === "agent" ? "任务会话" : "会话"}
+          </span>
           <button
             onClick={() => void newSession()}
             className="focus-ring flex h-6 w-6 items-center justify-center rounded-md text-muted hover:bg-ink/5 hover:text-teal"
@@ -385,7 +403,7 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
           <div className="flex items-center gap-3">
             <span className="max-w-[260px] truncate text-[12px] font-semibold text-ink">
-              {active?.title ?? "创作对话"}
+              {active?.title ?? (surface === "agent" ? "协作助手" : "创作对话")}
             </span>
             <div className="flex rounded-full border border-line p-0.5">
               {modes.map((mode) => (
@@ -412,16 +430,25 @@ export function ChatWorkspace({ premise }: { premise: Premise | null }) {
               <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full border border-teal/20 bg-teal-soft/40 text-teal">
                 <CornerDownLeft size={16} />
               </div>
-              <div className="display text-[18px] text-ink">对话只产出建议，不直接成为事实</div>
+              <div className="display text-[18px] text-ink">
+                {surface === "agent" ? "描述目标，助手会结合现有会话与候选工作" : "对话只产出建议，不直接成为事实"}
+              </div>
               <p className="mt-2 max-w-md text-[11.5px] leading-6 text-muted">
                 讨论人物、规则或章节目标。AI 消息可以“采纳为”候选，确认后才进入正式表。
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
-                {[
-                  "这个主角最大的秘密会怎样反噬他？",
-                  "给我三个第一场可以发生的冲突。",
-                  "这个世界规则有什么代价？",
-                ].map((prompt) => (
+                {(surface === "agent"
+                  ? [
+                      "结合现有设定，列出下一阶段最需要补的三块资料。",
+                      "哪些人物关系和伏笔正在形成叙事债务？",
+                      "根据当前结构给出下一卷的推进方案。",
+                    ]
+                  : [
+                      "这个主角最大的秘密会怎样反噬他？",
+                      "给我三个第一场可以发生的冲突。",
+                      "这个世界规则有什么代价？",
+                    ]
+                ).map((prompt) => (
                   <button
                     key={prompt}
                     onClick={() => void send(prompt)}
