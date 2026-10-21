@@ -720,6 +720,16 @@ export function StudioPage() {
                   <div className="text-[9.5px] leading-4 text-muted">
                     {context.totalChars} / {context.budget} 字 · {context.contextHash.slice(0, 10)}
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <Badge tone={context.retrievalMode === "hybrid" ? "teal" : "neutral"}>
+                      {context.retrievalMode === "hybrid" ? "混合检索" : "FTS + PPR"}
+                    </Badge>
+                    {context.embeddingError ? (
+                      <span className="truncate text-[8.5px] text-amber" title={context.embeddingError}>
+                        向量降级
+                      </span>
+                    ) : null}
+                  </div>
                   {context.sections.map((section) => (
                     <div
                       key={section.layer}
@@ -1057,8 +1067,18 @@ function ContextModal({
             <span className="text-muted">
               {context.totalChars} / {context.budget} 字
             </span>
-            <span className="font-mono text-ink-soft">{context.contextHash.slice(0, 20)}</span>
+            <div className="flex items-center gap-2">
+              <Badge tone={context.retrievalMode === "hybrid" ? "teal" : "neutral"}>
+                {context.retrievalMode === "hybrid" ? "FTS + 向量 + PPR" : "FTS + PPR"}
+              </Badge>
+              <span className="font-mono text-ink-soft">{context.contextHash.slice(0, 20)}</span>
+            </div>
           </div>
+          {context.embeddingError ? (
+            <div className="rounded-lg bg-amber-soft/40 px-3 py-2 text-[9.5px] leading-5 text-amber">
+              向量召回不可用，已自动降级：{context.embeddingError}
+            </div>
+          ) : null}
           {context.sections.map((section) => (
             <div key={section.layer} className="rounded-lg border border-line">
               <div className="flex items-center justify-between border-b border-line bg-paper/60 px-3 py-1.5">

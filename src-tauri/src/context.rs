@@ -1,9 +1,10 @@
 use rusqlite::{params, Connection};
 
 use crate::{
+    blueprint,
     domain::{ContextPreview, ContextSection, SceneRecord},
     error::AppResult,
-    blueprint, retrieval, scenes, seed, style,
+    retrieval, scenes, seed, style,
 };
 
 const LAYER_BUDGETS: &[(&str, &str, i32)] = &[
@@ -126,15 +127,13 @@ fn evidence_block(
     project_id: &str,
     scene: &SceneRecord,
     due_titles: &str,
-) -> AppResult<String> {
+    semantic: Option<&retrieval::SemanticQuery>,
+) -> AppResult<(String, String)> {
     let query = format!(
         "{} {} {} {}",
-        scene.goal,
-        scene.conflict,
-        scene.pov,
-        due_titles
+        scene.goal, scene.conflict, scene.pov, due_titles
     );
-    let hits = retrieval::search_for_scene(conn, project_id, &query, 8, Some(&scene.id))?;
+    let hybrid = retrieval::hybrid_search(conn, project_id, &query, 8, semantic, None)?;
     let pov_id = retrieval::entity_id_by_name(conn, project_id, &scene.pov)?;
     let mut seeds = Vec::new();
     if let Some(id) = pov_id {
@@ -149,12 +148,28 @@ fn evidence_block(
     let top_ids: Vec<String> = ranked.into_iter().take(4).map(|(id, _)| id).collect();
     let graph_claims = retrieval::graph_claims(conn, project_id, &top_ids, 4)?;
     let mut blocks = Vec::new();
-    if !hits.is_empty() {
-        blocks.push("[FTS5 原文命中]".to_string());
-        for hit in hits {
+    if !hybrid.hits.is_empty() {
+        blocks.push(format!(
+            "[{} 原文命中]",
+            if hybrid.retrieval_mode == "hybrid" {
+                "FTS + 向量 + PPR"
+            } else {
+                "FTS5 + PPR"
+            }
+        ));
+        for hit in hybrid.hits {
+            let channels = [
+                hit.fts_rank.map(|_| "FTS"),
+                hit.vector_rank.map(|_| "向量"),
+                hit.graph_rank.map(|_| "图谱"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("+");
             blocks.push(format!(
-                "- {}（来源 {}，相关度 {}）",
-                hit.excerpt, hit.source_id, hit.score
+                "- {}（{}｜来源 {}，RRF {}）",
+                hit.excerpt, channels, hit.source_id, hit.score
             ));
         }
     }
@@ -165,9 +180,12 @@ fn evidence_block(
         }
     }
     if blocks.is_empty() {
-        Ok("尚无可用原文证据。写作时不得把未知设定当作已确认事实。".into())
+        Ok((
+            "尚无可用原文证据。写作时不得把未知设定当作已确认事实。".into(),
+            hybrid.retrieval_mode,
+        ))
     } else {
-        Ok(blocks.join("\n"))
+        Ok((blocks.join("\n"), hybrid.retrieval_mode))
     }
 }
 
@@ -195,10 +213,7 @@ fn voice_block(
             },
         ) {
             if !anchor.0.trim().is_empty() && applied_samples.trim().is_empty() {
-                parts.push(format!(
-                    "[POV 声音锚点]\n{}",
-                    clip(&anchor.0, 900)
-                ));
+                parts.push(format!("[POV 声音锚点]\n{}", clip(&anchor.0, 900)));
             }
             if !anchor.1.is_empty() || !anchor.2.is_empty() {
                 parts.push(format!(
@@ -220,7 +235,9 @@ fn voice_block(
     {
         parts.push(style::contract(&profile));
     } else {
-        parts.push("[STYLE CONTRACT] 尚未建立文笔档案：使用作者当前样本与场景契约，不添加套话。".into());
+        parts.push(
+            "[STYLE CONTRACT] 尚未建立文笔档案：使用作者当前样本与场景契约，不添加套话。".into(),
+        );
     }
     Ok(parts.join("\n\n"))
 }
@@ -253,12 +270,47 @@ fn final_constraints(conn: &Connection, project_id: &str) -> AppResult<String> {
     Ok(block)
 }
 
+#[allow(dead_code)]
 pub fn compile(
     conn: &Connection,
     project_id: &str,
     scene_id: &str,
     budget: i32,
     style_override: Option<&str>,
+) -> AppResult<ContextPreview> {
+    compile_with_semantic(
+        conn,
+        project_id,
+        scene_id,
+        budget,
+        style_override,
+        None,
+        None,
+    )
+}
+
+pub fn scene_retrieval_query(
+    conn: &Connection,
+    project_id: &str,
+    scene_id: &str,
+) -> AppResult<String> {
+    let scene = scenes::get_scene(conn, project_id, scene_id)?;
+    Ok(format!(
+        "{} {} {} {}",
+        scene.goal, scene.conflict, scene.pov, scene.story_time
+    )
+    .trim()
+    .to_string())
+}
+
+pub fn compile_with_semantic(
+    conn: &Connection,
+    project_id: &str,
+    scene_id: &str,
+    budget: i32,
+    style_override: Option<&str>,
+    semantic: Option<&retrieval::SemanticQuery>,
+    embedding_error: Option<String>,
 ) -> AppResult<ContextPreview> {
     let budget = budget.clamp(2000, 60000);
     let scene = scenes::get_scene(conn, project_id, scene_id)?;
@@ -270,10 +322,20 @@ pub fn compile(
     let due_titles = promises
         .lines()
         .take(3)
-        .map(|line| line.trim_start_matches("- ").replace('[', "").replace(']', ""))
+        .map(|line| {
+            line.trim_start_matches("- ")
+                .replace('[', "")
+                .replace(']', "")
+        })
         .collect::<Vec<_>>()
         .join(" ");
 
+    let mut retrieval_mode = if semantic.is_some() {
+        "hybrid"
+    } else {
+        "fts_ppr"
+    }
+    .to_string();
     for (layer, title, percent) in LAYER_BUDGETS {
         let section_budget = (budget as f64 * *percent as f64 / 100.0).round() as i32;
         let content = match *layer {
@@ -298,7 +360,12 @@ pub fn compile(
             "L2" => claims_for_layer(conn, project_id, "L2", &scene.pov, branch.as_deref())?,
             "L3" => crate::wiki::context_index(conn, project_id)?,
             "L4" => promises.clone(),
-            "L5" => evidence_block(conn, project_id, &scene, &due_titles)?,
+            "L5" => {
+                let (content, mode) =
+                    evidence_block(conn, project_id, &scene, &due_titles, semantic)?;
+                retrieval_mode = mode;
+                content
+            }
             "L6" => voice_block(conn, project_id, &scene, style_override)?,
             "L7" => scenes::scene_contract(conn, project_id, &scene)?,
             _ => final_constraints(conn, project_id)?,
@@ -312,17 +379,23 @@ pub fn compile(
             content,
         });
     }
-    let hash_input = sections
-        .iter()
-        .map(|section| format!("[{}]{}", section.layer, section.content))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let hash_input = format!(
+        "retrieval:{retrieval_mode}\nembeddingError:{}\n{}",
+        embedding_error.as_deref().unwrap_or(""),
+        sections
+            .iter()
+            .map(|section| format!("[{}]{}", section.layer, section.content))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     let total_chars = sections.iter().map(|section| section.chars).sum();
     Ok(ContextPreview {
         sections,
         total_chars,
         budget,
         context_hash: crate::hash_text(&hash_input),
+        retrieval_mode,
+        embedding_error,
     })
 }
 
@@ -330,12 +403,7 @@ pub fn render(preview: &ContextPreview) -> String {
     preview
         .sections
         .iter()
-        .map(|section| {
-            format!(
-                "[{} {}]\n{}",
-                section.layer, section.title, section.content
-            )
-        })
+        .map(|section| format!("[{} {}]\n{}", section.layer, section.title, section.content))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
@@ -345,7 +413,7 @@ mod tests {
     use rusqlite::params;
 
     use crate::{
-        domain::{CreateProjectInput, SceneInput, SensoryPlan, EmotionBeat},
+        domain::{CreateProjectInput, EmotionBeat, SceneInput, SensoryPlan},
         project, scenes,
     };
 

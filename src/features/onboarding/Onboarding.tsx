@@ -69,7 +69,12 @@ export function Onboarding({ model, onProject, onModel }: Props) {
       model: modelName,
       temperature: model?.temperature ?? 0.8,
       maxTokens: model?.maxTokens ?? 4096,
+      embeddingMode: model?.embeddingMode ?? "off",
       embeddingModel: model?.embeddingModel ?? null,
+      embeddingBaseUrl: model?.embeddingBaseUrl ?? null,
+      embeddingDimensions: model?.embeddingDimensions ?? null,
+      embeddingBatchSize: model?.embeddingBatchSize ?? 32,
+      embeddingAutoIndex: model?.embeddingAutoIndex ?? false,
       apiKey: apiKey.trim() || null,
     });
     onModel(saved);

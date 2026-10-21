@@ -5,10 +5,13 @@ use serde::{Deserialize, Serialize};
 pub struct WikiPage {
     pub id: String,
     pub entity_id: Option<String>,
+    pub page_key: String,
     pub kind: String,
     pub title: String,
     pub content: String,
     pub content_hash: String,
+    pub source_hash: String,
+    pub compile_mode: String,
     pub source_ids: Vec<String>,
     pub source_spans: Vec<String>,
     pub generator_version: i32,
@@ -27,6 +30,25 @@ pub struct WikiRebuildResult {
     pub timelines: i32,
     pub promises: i32,
     pub chapters: i32,
+    pub preserved_author_pages: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiPageDependency {
+    pub page_id: String,
+    pub depends_on_page_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiLlmCompileResult {
+    pub pages: Vec<WikiPage>,
+    pub compiled: i32,
+    pub skipped: i32,
+    pub remaining: i32,
+    pub failed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

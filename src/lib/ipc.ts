@@ -80,9 +80,12 @@ export type {
   TimelineItem,
   GraphData,
   CommunityReport,
+  CommunitySummaryResult,
   InsightResult,
   ImpactSet,
   WikiPage,
+  WikiPageDependency,
+  WikiLlmCompileResult,
   WikiRebuildResult,
   WikiEditInput,
   CharacterVoiceSample,
@@ -124,6 +127,10 @@ export type {
   AgentToolDefinition,
   FoundationReport,
   FoundationCheck,
+  EmbeddingIndexResult,
+  EmbeddingStatus,
+  HybridSearchHit,
+  HybridSearchResult,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -149,7 +156,12 @@ const browserModel: ModelConfig = {
   model: "gpt-4o-mini",
   temperature: 0.8,
   maxTokens: 4096,
+  embeddingMode: "off",
   embeddingModel: null,
+  embeddingBaseUrl: null,
+  embeddingDimensions: null,
+  embeddingBatchSize: 32,
+  embeddingAutoIndex: false,
   hasApiKey: false,
 };
 
@@ -184,7 +196,12 @@ export const ipc = {
     model: string;
     temperature: number;
     maxTokens: number;
+    embeddingMode: string;
     embeddingModel: string | null;
+    embeddingBaseUrl: string | null;
+    embeddingDimensions: number | null;
+    embeddingBatchSize: number;
+    embeddingAutoIndex: boolean;
     apiKey: string | null;
   }): Promise<ModelConfig> {
     if (!isTauri()) return { ...browserModel, ...input, hasApiKey: Boolean(input.apiKey) };
@@ -417,12 +434,18 @@ export const ipc = {
   graphData: () => guarded(async () => unwrap(await commands.graphData())),
   communityBuild: () => guarded(async () => unwrap(await commands.communityBuild())),
   communities: () => guarded(async () => unwrap(await commands.communityList())),
+  communitySummarize: () =>
+    guarded(async () => unwrap(await commands.communitySummarize())),
   impactAnalysis: (entityId: string) =>
     guarded(async () => unwrap(await commands.impactAnalysis(entityId))),
   insightQuery: (question: string) =>
     guarded(async () => unwrap(await commands.insightQuery(question))),
   wikiList: () => guarded(async () => unwrap(await commands.wikiList())),
   wikiRebuild: () => guarded(async () => unwrap(await commands.wikiRebuild())),
+  wikiDependencies: () =>
+    guarded(async () => unwrap(await commands.wikiDependencies())),
+  wikiCompileLlm: (limit: number | null = 4) =>
+    guarded(async () => unwrap(await commands.wikiCompileLlm(limit))),
   wikiProposeEdit: (input: WikiEditInput) =>
     guarded(async () => unwrap(await commands.wikiProposeEdit(input))),
   voiceSamples: (characterId: string) =>
@@ -462,6 +485,17 @@ export const ipc = {
     guarded(async () => unwrap(await commands.agentRunRetryStep(runId, stepId))),
   agentFoundation: () =>
     guarded(async () => unwrap(await commands.agentFoundation())),
+
+  embeddingStatus: () =>
+    guarded(async () => unwrap(await commands.embeddingStatus())),
+  embeddingTest: () =>
+    guarded(async () => unwrap(await commands.embeddingTest())),
+  embeddingIndex: (rebuild = false) =>
+    guarded(async () => unwrap(await commands.embeddingIndex(rebuild))),
+  embeddingCancelIndex: () =>
+    guarded(async () => unwrap(await commands.embeddingCancelIndex())),
+  hybridSearch: (query: string, limit: number | null = 12) =>
+    guarded(async () => unwrap(await commands.hybridSearch(query, limit))),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };
@@ -518,5 +552,21 @@ export async function onAgentProgress(
   if (!isTauri()) return () => {};
   return listen<AgentProgressEvent>("agent://progress", (event) => handler(event.payload));
 }
+
+export async function onEmbeddingProgress(
+  handler: (event: EmbeddingProgressEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<EmbeddingProgressEvent>("embedding://progress", (event) =>
+    handler(event.payload),
+  );
+}
+
+export type EmbeddingProgressEvent = {
+  indexed: number;
+  total: number;
+  model: string;
+  message: string;
+};
 
 export { commands };

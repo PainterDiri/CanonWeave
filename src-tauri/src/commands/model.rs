@@ -10,6 +10,7 @@ use crate::{
 #[tauri::command]
 #[specta::specta]
 pub fn model_get(state: State<'_, AppState>) -> ModelConfig {
+    let _ = state.api_key();
     state.model_store.load()
 }
 

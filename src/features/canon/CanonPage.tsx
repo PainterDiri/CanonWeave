@@ -16,6 +16,8 @@ import { Badge, Button, EmptyState, Field, Input, SectionTitle } from "@/compone
 import {
   ipc,
   isTauri,
+  onEmbeddingProgress,
+  type EmbeddingStatus,
   type ExportResult,
   type ModelConfig,
   type RuleRecord,
@@ -238,12 +240,51 @@ function RulesPanel() {
 
 function ModelPanel({ model }: { model: ModelConfig | null }) {
   const setModel = useAppStore((s) => s.setModel);
+  const project = useAppStore((s) => s.project);
   const [baseUrl, setBaseUrl] = useState(model?.baseUrl ?? "https://api.openai.com/v1");
   const [modelName, setModelName] = useState(model?.model ?? "gpt-4o-mini");
   const [maxTokens, setMaxTokens] = useState(model?.maxTokens ?? 4096);
+  const [embeddingMode, setEmbeddingMode] = useState(model?.embeddingMode ?? "off");
+  const [embeddingModel, setEmbeddingModel] = useState(model?.embeddingModel ?? "");
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState(model?.embeddingBaseUrl ?? "");
+  const [embeddingDimensions, setEmbeddingDimensions] = useState(
+    model?.embeddingDimensions?.toString() ?? "",
+  );
+  const [embeddingBatchSize, setEmbeddingBatchSize] = useState(
+    model?.embeddingBatchSize ?? 32,
+  );
+  const [embeddingAutoIndex, setEmbeddingAutoIndex] = useState(
+    model?.embeddingAutoIndex ?? false,
+  );
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
+  const [embeddingProgress, setEmbeddingProgress] = useState<string | null>(null);
+  const [indexing, setIndexing] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const refreshEmbeddingStatus = useCallback(async () => {
+    if (!project) return;
+    try {
+      setEmbeddingStatus(await ipc.embeddingStatus());
+    } catch {
+      setEmbeddingStatus(null);
+    }
+  }, [project]);
+
+  useEffect(() => {
+    void refreshEmbeddingStatus();
+  }, [refreshEmbeddingStatus]);
+
+  useEffect(() => {
+    let dispose = () => {};
+    void onEmbeddingProgress((event) => {
+      setEmbeddingProgress(`${event.message} · ${event.model}`);
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => dispose();
+  }, []);
 
   const save = async () => {
     setBusy(true);
@@ -253,16 +294,58 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
         model: modelName,
         temperature: model?.temperature ?? 0.8,
         maxTokens,
-        embeddingModel: model?.embeddingModel ?? null,
+        embeddingMode,
+        embeddingModel: embeddingModel.trim() || null,
+        embeddingBaseUrl: embeddingBaseUrl.trim() || null,
+        embeddingDimensions: embeddingDimensions.trim()
+          ? Math.max(1, Number(embeddingDimensions))
+          : null,
+        embeddingBatchSize,
+        embeddingAutoIndex,
         apiKey: apiKey.trim() || null,
       });
       setModel(saved);
       setApiKey("");
-      setMessage({ ok: true, text: "配置已保存" });
+      setMessage({ ok: true, text: "模型与检索配置已保存" });
+      await refreshEmbeddingStatus();
     } catch (e) {
       setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const testEmbedding = async () => {
+    setBusy(true);
+    try {
+      await save();
+      const result = await ipc.embeddingTest();
+      setMessage({ ok: result.ok, text: `${result.message}（${result.latencyMs} ms）` });
+    } catch (e) {
+      setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const indexEmbeddings = async (rebuild: boolean) => {
+    setIndexing(true);
+    setEmbeddingProgress(rebuild ? "正在重建全部向量" : "正在检查失效与缺失向量");
+    try {
+      await save();
+      const result = await ipc.embeddingIndex(rebuild);
+      setMessage({
+        ok: true,
+        text: result.canceled
+          ? `索引已取消，已提交 ${result.indexed} 条，剩余 ${result.remaining} 条`
+          : `索引完成：新增 ${result.indexed} 条，复用 ${result.skipped} 条，剩余 ${result.remaining} 条`,
+      });
+      await refreshEmbeddingStatus();
+    } catch (e) {
+      setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setIndexing(false);
+      setEmbeddingProgress(null);
     }
   };
 
@@ -280,7 +363,7 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
   };
 
   return (
-    <section className="paper-card max-w-[680px] p-6">
+    <section className="paper-card max-w-[780px] p-6">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <div className="text-[14px] font-semibold text-ink">OpenAI 兼容接口</div>
@@ -338,8 +421,142 @@ function ModelPanel({ model }: { model: ModelConfig | null }) {
           </Button>
         </div>
       </div>
-      <div className="mt-5 rounded-lg border border-line bg-paper px-3.5 py-3 text-[10.5px] leading-5 text-muted">
-        未配置嵌入模型时，全文检索与图谱检索仍然可用；向量召回会自动降级。
+
+      <div className="my-5 h-px bg-line" />
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-semibold text-ink">可选 Embedding</div>
+          <div className="mt-1 text-[10.5px] leading-5 text-muted">
+            关闭时使用 FTS5 + PPR。开启后按内容哈希增量更新，并用 RRF 融合三类召回。
+          </div>
+        </div>
+        <Badge
+          tone={
+            embeddingMode === "off"
+              ? "neutral"
+              : embeddingStatus?.ready
+                ? "teal"
+                : "amber"
+          }
+        >
+          {embeddingMode === "off"
+            ? "已关闭"
+            : `${embeddingStatus?.ready ?? 0} 条就绪`}
+        </Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Embedding 模式">
+          <select
+            value={embeddingMode}
+            onChange={(event) => setEmbeddingMode(event.target.value)}
+            className="focus-ring h-10 w-full rounded-[10px] border border-line-strong bg-paper-raised px-3 text-[12px] text-ink"
+          >
+            <option value="off">关闭</option>
+            <option value="local">本地 OpenAI 兼容服务</option>
+            <option value="api">OpenAI 兼容 Embedding API</option>
+          </select>
+        </Field>
+        <Field label="Embedding 模型">
+          <Input
+            value={embeddingModel}
+            onChange={(event) => setEmbeddingModel(event.target.value)}
+            placeholder="text-embedding-3-small"
+            disabled={embeddingMode === "off"}
+          />
+        </Field>
+        <Field label="Embedding Base URL" hint="留空使用上方 Base URL">
+          <Input
+            value={embeddingBaseUrl}
+            onChange={(event) => setEmbeddingBaseUrl(event.target.value)}
+            placeholder="http://127.0.0.1:11434/v1"
+            disabled={embeddingMode === "off"}
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="向量维度" hint="可选">
+            <Input
+              type="number"
+              min={1}
+              value={embeddingDimensions}
+              onChange={(event) => setEmbeddingDimensions(event.target.value)}
+              placeholder="由服务决定"
+              disabled={embeddingMode === "off"}
+            />
+          </Field>
+          <Field label="批大小">
+            <Input
+              type="number"
+              min={1}
+              max={256}
+              value={embeddingBatchSize}
+              onChange={(event) => setEmbeddingBatchSize(Number(event.target.value))}
+              disabled={embeddingMode === "off"}
+            />
+          </Field>
+        </div>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-[10.5px] text-ink-soft">
+        <input
+          type="checkbox"
+          checked={embeddingAutoIndex}
+          onChange={(event) => setEmbeddingAutoIndex(event.target.checked)}
+          disabled={embeddingMode === "off"}
+          className="h-3.5 w-3.5 accent-teal"
+        />
+        项目打开后自动增量补建失效向量
+      </label>
+      <div className="mt-4 rounded-lg bg-paper px-3.5 py-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[9.5px] text-muted">
+          <span>就绪 {embeddingStatus?.ready ?? 0}</span>
+          <span>失效 {embeddingStatus?.stale ?? 0}</span>
+          <span>失败 {embeddingStatus?.error ?? 0}</span>
+          <span>其他模型 {embeddingStatus?.otherModel ?? 0}</span>
+        </div>
+        {embeddingProgress ? (
+          <div className="mt-2 flex items-center gap-1.5 text-[9.5px] text-teal">
+            <LoaderCircle size={10} className="animate-spin" />
+            {embeddingProgress}
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="max-w-[410px] text-[9.5px] leading-4 text-muted">
+          开启 API 模式会把选中的正文摘要、人物、知识、事实、伏笔和 Wiki 内容发送给 Embedding 服务。API Key
+          仍只保存在系统钥匙串，不进入项目或导出。
+        </div>
+        <div className="flex gap-2">
+          {indexing ? (
+            <Button
+              size="sm"
+              tone="ghost"
+              onClick={() => void ipc.embeddingCancelIndex()}
+            >
+              取消索引
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            onClick={() => void testEmbedding()}
+            disabled={busy || indexing || embeddingMode === "off"}
+          >
+            测试 Embedding
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void indexEmbeddings(false)}
+            disabled={busy || indexing || embeddingMode === "off"}
+          >
+            增量更新
+          </Button>
+          <Button
+            size="sm"
+            tone="primary"
+            onClick={() => void indexEmbeddings(true)}
+            disabled={busy || indexing || embeddingMode === "off"}
+          >
+            重建索引
+          </Button>
+        </div>
       </div>
     </section>
   );

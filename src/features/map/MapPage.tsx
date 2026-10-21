@@ -13,6 +13,7 @@ import {
   ipc,
   type CommunityReport,
   type GraphData,
+  type HybridSearchResult,
   type ImpactSet,
   type InsightResult,
   type TimelineItem,
@@ -29,6 +30,9 @@ export function MapPage() {
   const [impact, setImpact] = useState<ImpactSet | null>(null);
   const [question, setQuestion] = useState("");
   const [insight, setInsight] = useState<InsightResult | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [hybrid, setHybrid] = useState<HybridSearchResult | null>(null);
+  const [searchBusy, setSearchBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,10 +61,30 @@ export function MapPage() {
 
   const buildCommunities = async () => {
     setBusy(true);
+    setError(null);
     try {
       setCommunities(await ipc.communityBuild());
       setGraph(await ipc.graphData());
-      notify("社区报告已重建");
+      notify("层级社区已增量更新；未变化的报告会保留稳定 ID");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summarizeCommunities = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await ipc.communitySummarize();
+      setCommunities(result.reports);
+      notify(
+        `模型摘要：新编译 ${result.compiled} 个，保留 ${result.preserved} 个，剩余 ${result.remaining} 个`,
+      );
+      if (result.failed.length) {
+        setError(`部分社区未更新：${result.failed.slice(0, 3).join("；")}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -77,6 +101,18 @@ export function MapPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const searchEvidence = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchBusy(true);
+    try {
+      setHybrid(await ipc.hybridSearch(searchQuery.trim(), 12));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSearchBusy(false);
     }
   };
 
@@ -181,13 +217,23 @@ export function MapPage() {
                   GraphRAG 全书问答
                 </div>
                 <p className="mt-1.5 max-w-2xl text-[11px] leading-5 text-muted">
-                  社区报告是派生摘要，不是权威事实。回答会附带来源 ID，可回到原文与事实。
+                  先按实体别名与图谱 PPR 选子图，再融合 FTS、向量与社区证据。报告是派生摘要，不是权威事实。
                 </p>
               </div>
-              <Button size="sm" onClick={() => void buildCommunities()} disabled={busy}>
-                {busy ? <LoaderCircle size={12} className="animate-spin" /> : null}
-                重建社区摘要
-              </Button>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => void buildCommunities()} disabled={busy}>
+                  {busy ? <LoaderCircle size={12} className="animate-spin" /> : null}
+                  增量重建
+                </Button>
+                <Button
+                  size="sm"
+                  tone="primary"
+                  onClick={() => void summarizeCommunities()}
+                  disabled={busy || communities.length === 0}
+                >
+                  模型摘要
+                </Button>
+              </div>
             </div>
             <div className="mt-4 flex gap-2">
               <Input
@@ -202,12 +248,26 @@ export function MapPage() {
             </div>
             {insight ? (
               <div className="mt-4 rounded-xl border border-teal/20 bg-teal-soft/30 p-4">
-                <div className="text-[10px] font-semibold tracking-wide text-teal">
-                  派生分析 · 非权威事实
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-semibold tracking-wide text-teal">
+                    派生分析 · 非权威事实
+                  </div>
+                  <Badge tone={insight.retrievalMode === "hybrid" ? "teal" : "neutral"}>
+                    {insight.retrievalMode === "hybrid" ? "混合子图检索" : "FTS + PPR"}
+                  </Badge>
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-[12px] leading-7 text-ink-soft">
                   {insight.answer}
                 </p>
+                {insight.embeddingError ? (
+                  <div className="mt-3 rounded-lg bg-amber-soft/40 px-3 py-2 text-[9.5px] leading-5 text-amber">
+                    查询向量不可用，已降级：{insight.embeddingError}
+                  </div>
+                ) : null}
+                <div className="mt-3 text-[9px] text-muted">
+                  {insight.entityIds.length} 个实体种子 · {insight.communityIds.length} 个社区 ·{" "}
+                  {insight.sourceIds.length} 个来源
+                </div>
                 <div className="mt-3 flex flex-wrap gap-1">
                   {insight.sourceIds.map((source) => (
                     <span
@@ -223,11 +283,84 @@ export function MapPage() {
             ) : null}
           </section>
 
+          <section className="paper-card p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[13px] font-semibold text-ink">证据检索</div>
+                <div className="mt-1 text-[10.5px] leading-5 text-muted">
+                  FTS5、向量召回与 PPR 按 RRF 融合；向量不可用时自动降级。
+                </div>
+              </div>
+              {hybrid ? (
+                <Badge tone={hybrid.retrievalMode === "hybrid" ? "teal" : "neutral"}>
+                  {hybrid.retrievalMode === "hybrid" ? "混合检索" : "FTS + PPR"}
+                </Badge>
+              ) : null}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="例如：阿澈为什么不再相信守夜人？"
+                onKeyDown={(event) => event.key === "Enter" && void searchEvidence()}
+              />
+              <Button
+                tone="primary"
+                onClick={() => void searchEvidence()}
+                disabled={searchBusy || !searchQuery.trim()}
+                className="shrink-0 whitespace-nowrap"
+              >
+                {searchBusy ? <LoaderCircle size={12} className="animate-spin" /> : null}
+                检索证据
+              </Button>
+            </div>
+            {hybrid?.embeddingError ? (
+              <div className="mt-3 rounded-lg bg-amber-soft/40 px-3 py-2 text-[9.5px] leading-5 text-amber">
+                向量召回已降级：{hybrid.embeddingError}
+              </div>
+            ) : null}
+            {hybrid ? (
+              <div className="mt-3 space-y-2">
+                {hybrid.hits.length === 0 ? (
+                  <div className="py-6 text-center text-[10.5px] text-muted">没有召回证据</div>
+                ) : (
+                  hybrid.hits.map((hit) => {
+                    const channels = [
+                      hit.ftsRank ? "FTS" : null,
+                      hit.vectorRank ? "向量" : null,
+                      hit.graphRank ? "图谱" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" + ");
+                    return (
+                      <article
+                        key={`${hit.sourceKind}-${hit.sourceId}`}
+                        className="rounded-lg border border-line bg-paper px-3 py-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-mono text-[8.5px] text-muted">
+                            {hit.sourceKind}:{hit.sourceId}
+                          </span>
+                          <span className="text-[8.5px] text-teal">
+                            {channels || "候选"} · RRF {hit.score}
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-3 text-[10.5px] leading-5 text-ink-soft">
+                          {hit.excerpt}
+                        </p>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            ) : null}
+          </section>
+
           {communities.length === 0 ? (
             <EmptyState
               icon={<Radar size={20} />}
               title="尚无社区报告"
-              description="建立关系与已确认事实后，系统会执行加权标签传播社区发现，并为每个社区生成带来源的派生摘要。"
+              description="建立关系与已确认事实后，系统会执行分层加权社区发现，并为每个社区生成带来源的派生摘要。"
               action={
                 <Button onClick={() => void buildCommunities()} disabled={busy}>
                   建立社区摘要
@@ -240,7 +373,13 @@ export function MapPage() {
                 <article key={report.id} className="paper-card p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-[12px] font-semibold text-ink">{report.title}</div>
-                    {report.staleAt ? <Badge tone="amber">已过期</Badge> : <Badge tone="teal">新鲜</Badge>}
+                    <div className="flex gap-1">
+                      <Badge tone="neutral">L{report.level}</Badge>
+                      <Badge tone={report.summaryMode === "llm" ? "teal" : "neutral"}>
+                        {report.summaryMode === "llm" ? "模型摘要" : "确定性"}
+                      </Badge>
+                      {report.staleAt ? <Badge tone="amber">已过期</Badge> : null}
+                    </div>
                   </div>
                   <p className="mt-2 line-clamp-5 whitespace-pre-wrap text-[10.5px] leading-5 text-ink-soft">
                     {report.content}

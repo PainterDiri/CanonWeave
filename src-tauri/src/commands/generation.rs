@@ -35,7 +35,7 @@ fn payload_text_len(text: &str) -> usize {
 
 #[tauri::command]
 #[specta::specta]
-pub fn generation_start(
+pub async fn generation_start(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: GenerationInput,
@@ -48,6 +48,13 @@ pub fn generation_start(
         .api_key()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "尚未保存 API Key，请先在设置中填写并测试连接".to_string())?;
+    let retrieval_query = state
+        .with_project(|loaded| {
+            context::scene_retrieval_query(&loaded.conn, &loaded.summary.id, &input.scene_id)
+        })
+        .map_err(|error| error.to_string())?;
+    let (semantic, embedding_error) =
+        super::embedding::semantic_query(&state, &retrieval_query).await;
     let (project_id, scene, chapter, preview, style_version, style_profile, entity_names) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
@@ -55,12 +62,14 @@ pub fn generation_start(
             .map_err(|e| e.to_string())?;
         let chapter = scenes::get_chapter(&loaded.conn, &loaded.summary.id, &scene.chapter_id)
             .map_err(|e| e.to_string())?;
-        let preview = context::compile(
+        let preview = context::compile_with_semantic(
             &loaded.conn,
             &loaded.summary.id,
             &input.scene_id,
             12000,
             input.style_profile_id.as_deref(),
+            semantic.as_ref(),
+            embedding_error,
         )
         .map_err(|e| e.to_string())?;
         let profiles = style::list(&loaded.conn, &loaded.summary.id).map_err(|e| e.to_string())?;

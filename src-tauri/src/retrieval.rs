@@ -5,9 +5,16 @@ use jieba_rs::Jieba;
 use rusqlite::{params, Connection};
 
 use crate::{
-    domain::SearchHit,
+    domain::{HybridSearchHit, HybridSearchResult, SearchHit},
     error::AppResult,
 };
+
+#[derive(Debug, Clone)]
+pub struct SemanticQuery {
+    pub vector: Vec<f32>,
+    pub model: String,
+    pub dimensions: i32,
+}
 
 fn jieba() -> &'static Jieba {
     static INSTANCE: OnceLock<Jieba> = OnceLock::new();
@@ -57,24 +64,27 @@ pub fn search_for_scene(
          ORDER BY bm25(text_fts) ASC LIMIT ?3",
     )?;
     let raw = stmt
-        .query_map(
-            params![project_id, fts_query(query), limit as i32],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, f64>(3)?,
-                ))
-            },
-        )?
+        .query_map(params![project_id, fts_query(query), limit as i32], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
     if raw.is_empty() {
         return Ok(vec![]);
     }
-    let best = raw.iter().map(|(_, _, _, rank)| *rank).fold(f64::INFINITY, f64::min);
-    let worst = raw.iter().map(|(_, _, _, rank)| *rank).fold(f64::NEG_INFINITY, f64::max);
+    let best = raw
+        .iter()
+        .map(|(_, _, _, rank)| *rank)
+        .fold(f64::INFINITY, f64::min);
+    let worst = raw
+        .iter()
+        .map(|(_, _, _, rank)| *rank)
+        .fold(f64::NEG_INFINITY, f64::max);
     let span = (worst - best).abs().max(0.0001);
     let preference = crate::preferences::targets(conn, project_id, scene_id)?;
     let mut ranked = raw
@@ -111,6 +121,214 @@ pub fn search_for_scene(
             .then_with(|| b.0.score.cmp(&a.0.score))
     });
     Ok(ranked.into_iter().map(|(hit, _)| hit).collect())
+}
+
+#[derive(Debug)]
+struct HybridEntry {
+    source_kind: String,
+    source_id: String,
+    chapter_id: Option<String>,
+    excerpt: String,
+    rrf: f64,
+    fts_rank: Option<i32>,
+    vector_rank: Option<i32>,
+    graph_rank: Option<i32>,
+}
+
+fn hybrid_key(
+    source_kind: &str,
+    source_id: &str,
+    chapter_id: Option<&str>,
+) -> (String, String, Option<String>) {
+    if source_kind == "chapter" {
+        let chapter_id = chapter_id.unwrap_or(source_id);
+        (
+            "chapter".into(),
+            chapter_id.to_string(),
+            Some(chapter_id.to_string()),
+        )
+    } else {
+        (
+            source_kind.to_string(),
+            source_id.to_string(),
+            chapter_id.map(str::to_string),
+        )
+    }
+}
+
+fn add_rrf(
+    entries: &mut HashMap<(String, String), HybridEntry>,
+    source_kind: &str,
+    source_id: &str,
+    chapter_id: Option<&str>,
+    excerpt: String,
+    rank: usize,
+    channel: &str,
+) {
+    let (source_kind, source_id, chapter_id) = hybrid_key(source_kind, source_id, chapter_id);
+    let key = (source_kind.clone(), source_id.clone());
+    let entry = entries.entry(key).or_insert_with(|| HybridEntry {
+        source_kind,
+        source_id,
+        chapter_id,
+        excerpt: String::new(),
+        rrf: 0.0,
+        fts_rank: None,
+        vector_rank: None,
+        graph_rank: None,
+    });
+    entry.rrf += 1.0 / (60.0 + rank as f64);
+    if entry.excerpt.trim().is_empty() && !excerpt.trim().is_empty() {
+        entry.excerpt = excerpt;
+    }
+    let rank = rank as i32;
+    match channel {
+        "fts" => entry.fts_rank = Some(rank),
+        "vector" => entry.vector_rank = Some(rank),
+        "graph" => entry.graph_rank = Some(rank),
+        _ => {}
+    }
+}
+
+pub fn hybrid_search(
+    conn: &Connection,
+    project_id: &str,
+    query: &str,
+    limit: usize,
+    semantic: Option<&SemanticQuery>,
+    embedding_error: Option<String>,
+) -> AppResult<HybridSearchResult> {
+    let mut entries: HashMap<(String, String), HybridEntry> = HashMap::new();
+    if !query.trim().is_empty() {
+        let raw = {
+            let mut stmt = conn.prepare(
+                "SELECT source_id, source_kind, chapter_id,
+                    snippet(text_fts, 0, '[', ']', '…', 28),
+                    bm25(text_fts)
+                 FROM text_fts
+                 WHERE project_id=?1 AND tokenized MATCH ?2
+                 ORDER BY bm25(text_fts) ASC LIMIT ?3",
+            )?;
+            let rows = stmt
+                .query_map(
+                    params![project_id, fts_query(query), (limit * 3).max(12) as i32],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        };
+        for (rank, (source_id, source_kind, chapter_id, excerpt)) in raw.into_iter().enumerate() {
+            add_rrf(
+                &mut entries,
+                &source_kind,
+                &source_id,
+                chapter_id.as_deref(),
+                excerpt,
+                rank + 1,
+                "fts",
+            );
+        }
+    }
+
+    let branch_id = crate::branches::current(conn, project_id)?;
+    let mut vector_hits = Vec::new();
+    if let Some(semantic) = semantic {
+        vector_hits = crate::embedding::vector_search(
+            conn,
+            project_id,
+            &semantic.model,
+            semantic.dimensions,
+            &semantic.vector,
+            branch_id.as_deref(),
+            (limit * 3).max(16),
+        )?;
+        for (rank, hit) in vector_hits.iter().enumerate() {
+            add_rrf(
+                &mut entries,
+                &hit.owner_kind,
+                &hit.owner_id,
+                None,
+                hit.content.chars().take(600).collect(),
+                rank + 1,
+                "vector",
+            );
+        }
+    }
+
+    let mut seeds = crate::embedding::link_entities(conn, project_id, query, 8)?;
+    if seeds.is_empty() {
+        seeds = vector_hits
+            .iter()
+            .filter(|hit| hit.owner_kind == "entity")
+            .take(4)
+            .map(|hit| hit.owner_id.clone())
+            .collect();
+    }
+    if !seeds.is_empty() {
+        let scores = ppr(conn, project_id, &seeds, 0.85)?;
+        let mut ranked: Vec<_> = scores.into_iter().collect();
+        ranked.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (rank, (id, _)) in ranked.into_iter().take((limit * 2).max(12)).enumerate() {
+            if let Ok(entity) = crate::entities::get_entity(conn, project_id, &id) {
+                add_rrf(
+                    &mut entries,
+                    "entity",
+                    &id,
+                    None,
+                    format!("{}：{}", entity.canonical_name, entity.description),
+                    rank + 1,
+                    "graph",
+                );
+            }
+        }
+    }
+
+    let mut rows = entries.into_values().collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        right
+            .rrf
+            .partial_cmp(&left.rrf)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rows.truncate(limit);
+    let best = rows.first().map(|row| row.rrf).unwrap_or(1.0).max(0.0001);
+    let has_vector = semantic.is_some() && rows.iter().any(|row| row.vector_rank.is_some());
+    let hits = rows
+        .into_iter()
+        .map(|row| HybridSearchHit {
+            source_kind: row.source_kind,
+            source_id: row.source_id,
+            chapter_id: row.chapter_id,
+            excerpt: row.excerpt,
+            score: ((row.rrf / best) * 100.0).round().clamp(0.0, 100.0) as i32,
+            fts_rank: row.fts_rank,
+            vector_rank: row.vector_rank,
+            graph_rank: row.graph_rank,
+        })
+        .collect();
+    Ok(HybridSearchResult {
+        hits,
+        retrieval_mode: if has_vector {
+            "hybrid".into()
+        } else {
+            "fts_ppr".into()
+        },
+        model: semantic.map(|query| query.model.clone()),
+        dimensions: semantic.map(|query| query.dimensions),
+        embedding_error,
+    })
 }
 
 /// 在实体图上运行 Personalized PageRank。边来自关系与同层事实中的实体连接。
@@ -299,5 +517,89 @@ mod tests {
         let scores = ppr(&conn, "p", &["a".into()], 0.85).unwrap();
         assert!(scores["b"] > scores["c"]);
         assert!(scores["a"] > 0.0);
+    }
+
+    #[test]
+    fn hybrid_search_fuses_fts_vector_and_graph_with_rrf() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO project (id,name,root_path,schema_version,writing_language,mode,created_at,updated_at)
+             VALUES ('p','t','/tmp/t',9,'zh-CN','idea','now','now');
+             INSERT INTO entity (id,project_id,type,canonical_name,aliases,status,description,created_at,updated_at)
+             VALUES ('a','p','character','林澈','[]','confirmed','寻找旧钥匙','now','now'),
+                    ('b','p','character','守夜人','[]','confirmed','保管旧钥匙','now','now');
+             INSERT INTO relation (id,project_id,from_id,to_id,type,status,created_at)
+             VALUES ('ab','p','a','b','敌对','confirmed','now');",
+        )
+        .unwrap();
+        let content = "林澈握紧旧钥匙，守夜人看见后退了一步。";
+        conn.execute(
+            "INSERT INTO text_fts
+             (content, tokenized, source_id, project_id, source_kind, chapter_id, branch_id)
+             VALUES (?1,?2,'a','p','entity',NULL,NULL)",
+            params![content, tokenize(content)],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO embedding
+             (id,project_id,owner_kind,owner_id,model,dim,vector,content,content_hash,status,
+              branch_id,updated_at,created_at)
+             VALUES ('ea','p','entity','a','embed',2,X'0000803F00000000','阿澈握着黄铜钥匙','ha','ready',NULL,'now','now'),
+                    ('eb','p','entity','b','embed',2,X'0000803F00000000','守夜人保管钥匙','hb','ready',NULL,'now','now');",
+        )
+        .unwrap();
+        let semantic = SemanticQuery {
+            vector: vec![1.0, 0.0],
+            model: "embed".into(),
+            dimensions: 2,
+        };
+        let result = hybrid_search(&conn, "p", "林澈与旧钥匙", 10, Some(&semantic), None).unwrap();
+        assert_eq!(result.retrieval_mode, "hybrid");
+        let entity = result.hits.iter().find(|hit| hit.source_id == "a").unwrap();
+        assert!(entity.fts_rank.is_some());
+        assert!(entity.vector_rank.is_some());
+        assert!(entity.graph_rank.is_some());
+        assert!(result
+            .hits
+            .iter()
+            .any(|hit| hit.source_id == "b" && hit.vector_rank.is_some()));
+    }
+
+    #[test]
+    fn hybrid_search_degrades_to_fts_and_ppr_without_query_vector() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO project (id,name,root_path,schema_version,writing_language,mode,created_at,updated_at)
+             VALUES ('p','t','/tmp/t',9,'zh-CN','idea','now','now');
+             INSERT INTO entity (id,project_id,type,canonical_name,aliases,status,description,created_at,updated_at)
+             VALUES ('a','p','character','林澈','[]','confirmed','寻找旧钥匙','now','now');",
+        )
+        .unwrap();
+        let content = "林澈在旧车站找到旧钥匙。";
+        conn.execute(
+            "INSERT INTO text_fts
+             (content, tokenized, source_id, project_id, source_kind, chapter_id, branch_id)
+             VALUES (?1,?2,'a','p','entity',NULL,NULL)",
+            params![content, tokenize(content)],
+        )
+        .unwrap();
+        let result = hybrid_search(
+            &conn,
+            "p",
+            "旧钥匙",
+            10,
+            None,
+            Some("Embedding 服务不可用".into()),
+        )
+        .unwrap();
+        assert_eq!(result.retrieval_mode, "fts_ppr");
+        assert_eq!(
+            result.embedding_error.as_deref(),
+            Some("Embedding 服务不可用")
+        );
+        assert!(!result.hits.is_empty());
+        assert!(result.hits.iter().all(|hit| hit.vector_rank.is_none()));
     }
 }

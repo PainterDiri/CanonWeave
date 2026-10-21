@@ -33,6 +33,7 @@ mod preferences;
 mod motifs;
 mod export;
 mod foundation;
+mod embedding;
 
 use tauri_specta::{collect_commands, Builder};
 use tauri::Manager;
@@ -83,12 +84,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
         issue_list, issue_action, draft_accept_variant
         , revision_list, revision_compare, revision_rollback, preference_save, branch_list,
         branch_create, branch_switch, timeline_data, graph_data, community_build,
-        community_list, impact_analysis, insight_query, wiki_list, wiki_rebuild,
-        wiki_propose_edit, voice_sample_list, voice_sample_add, voice_profile_get,
+        community_list, community_summarize, impact_analysis, insight_query, wiki_list,
+        wiki_rebuild, wiki_dependencies, wiki_compile_llm, wiki_propose_edit,
+        voice_sample_list, voice_sample_add, voice_profile_get,
         voice_thresholds_save, voice_check, preference_summary, motif_list,
         motif_density_check, export_project, agent_tools, agent_runs, agent_run_create,
         agent_run_get, agent_run_execute, agent_run_pause, agent_run_cancel,
-        agent_run_resume, agent_run_retry_step, agent_foundation
+        agent_run_resume, agent_run_retry_step, agent_foundation, embedding_status,
+        embedding_test, embedding_index, embedding_cancel_index, hybrid_search
     ])
 }
 

@@ -113,10 +113,23 @@ impl ModelStore {
             model: input.model.trim().to_string(),
             temperature: input.temperature.clamp(0.0, 2.0),
             max_tokens: input.max_tokens.clamp(64, 200_000),
+            embedding_mode: if ["off", "local", "api"].contains(&input.embedding_mode.as_str()) {
+                input.embedding_mode.clone()
+            } else {
+                "off".into()
+            },
             embedding_model: input
                 .embedding_model
                 .clone()
                 .filter(|v| !v.trim().is_empty()),
+            embedding_base_url: input
+                .embedding_base_url
+                .clone()
+                .map(|value| value.trim().trim_end_matches('/').to_string())
+                .filter(|value| !value.is_empty()),
+            embedding_dimensions: input.embedding_dimensions.filter(|value| *value > 0),
+            embedding_batch_size: input.embedding_batch_size.clamp(1, 256),
+            embedding_auto_index: input.embedding_auto_index,
             has_api_key,
         };
         self.write_file(&config)?;
@@ -245,7 +258,12 @@ mod tests {
             model: "local".into(),
             temperature: 0.7,
             max_tokens: 512,
+            embedding_mode: "off".into(),
             embedding_model: None,
+            embedding_base_url: None,
+            embedding_dimensions: None,
+            embedding_batch_size: 32,
+            embedding_auto_index: false,
             has_api_key: true,
         };
         store.write_file(&config).unwrap();
@@ -266,7 +284,12 @@ mod tests {
             model: "local".into(),
             temperature: 0.7,
             max_tokens: 512,
+            embedding_mode: "off".into(),
             embedding_model: None,
+            embedding_base_url: None,
+            embedding_dimensions: None,
+            embedding_batch_size: 32,
+            embedding_auto_index: false,
             has_api_key: true,
         };
         store.write_file(&existing).unwrap();
@@ -277,13 +300,27 @@ mod tests {
                 model: "updated".into(),
                 temperature: 0.5,
                 max_tokens: 1024,
-                embedding_model: None,
+                embedding_mode: "api".into(),
+                embedding_model: Some("text-embedding-3-small".into()),
+                embedding_base_url: Some("https://embed.example/v1".into()),
+                embedding_dimensions: Some(1536),
+                embedding_batch_size: 48,
+                embedding_auto_index: true,
                 api_key: None,
             })
             .unwrap();
 
         assert!(saved.has_api_key);
         assert!(store.load().has_api_key);
+        let loaded = store.load();
+        assert_eq!(loaded.embedding_mode, "api");
+        assert_eq!(
+            loaded.embedding_model.as_deref(),
+            Some("text-embedding-3-small")
+        );
+        assert_eq!(loaded.embedding_dimensions, Some(1536));
+        assert_eq!(loaded.embedding_batch_size, 48);
+        assert!(loaded.embedding_auto_index);
         let raw = std::fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
         assert!(!raw.contains("api_key"));
     }

@@ -3,11 +3,10 @@ use tauri::State;
 
 use crate::{
     candidates, context,
-    domain::{
-        ChapterRecord, ContextPreview, DraftAcceptResult, SceneInput, SceneRecord,
-    },
+    domain::{ChapterRecord, ContextPreview, DraftAcceptResult, SceneInput, SceneRecord},
     error::IpcResult,
-    scenes, state::AppState,
+    scenes,
+    state::AppState,
 };
 
 #[tauri::command]
@@ -52,23 +51,31 @@ pub fn scene_contract_text(state: State<'_, AppState>, scene_id: String) -> IpcR
 
 #[tauri::command]
 #[specta::specta]
-pub fn context_preview(
+pub async fn context_preview(
     state: State<'_, AppState>,
     scene_id: String,
     budget: Option<i32>,
     style_profile_id: Option<String>,
 ) -> IpcResult<ContextPreview> {
+    let query = state
+        .with_project(|loaded| {
+            context::scene_retrieval_query(&loaded.conn, &loaded.summary.id, &scene_id)
+        })
+        .map_err(|error| error.to_string())?;
+    let (semantic, embedding_error) = super::embedding::semantic_query(&state, &query).await;
     state
         .with_project(|loaded| {
-            context::compile(
+            context::compile_with_semantic(
                 &loaded.conn,
                 &loaded.summary.id,
                 &scene_id,
                 budget.unwrap_or(12000),
                 style_profile_id.as_deref(),
+                semantic.as_ref(),
+                embedding_error.clone(),
             )
         })
-        .map_err(|e| e.to_string())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -86,7 +93,10 @@ pub fn chapter_text_save(
     chapter_id: String,
     text: String,
 ) -> IpcResult<DraftAcceptResult> {
-    let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏".to_string())?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(|_| "项目状态锁已损坏".to_string())?;
     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
     scenes::commit_text(
         &mut loaded.conn,
@@ -133,7 +143,10 @@ fn accept_draft(
     use_refined: bool,
     acknowledge_fact_changes: bool,
 ) -> IpcResult<DraftAcceptResult> {
-    let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏".to_string())?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(|_| "项目状态锁已损坏".to_string())?;
     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
     let candidate = candidates::get(&loaded.conn, &loaded.summary.id, candidate_id)
         .map_err(|e| e.to_string())?;
@@ -154,7 +167,11 @@ fn accept_draft(
     }
     let text = candidate
         .payload
-        .get(if use_refined { "refinedText" } else { "rawText" })
+        .get(if use_refined {
+            "refinedText"
+        } else {
+            "rawText"
+        })
         .or_else(|| candidate.payload.get("text"))
         .and_then(serde_json::Value::as_str)
         .filter(|text| !text.trim().is_empty())

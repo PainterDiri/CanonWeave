@@ -86,6 +86,8 @@ pub struct ContextPreview {
     pub total_chars: i32,
     pub budget: i32,
     pub context_hash: String,
+    pub retrieval_mode: String,
+    pub embedding_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

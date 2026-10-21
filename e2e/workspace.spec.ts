@@ -287,7 +287,12 @@ async function installMock(page: import("@playwright/test").Page) {
                 model: "gpt-4o-mini",
                 temperature: 0.8,
                 maxTokens: 4096,
-                embeddingModel: null,
+                embeddingMode: "api",
+                embeddingModel: "text-embedding-3-small",
+                embeddingBaseUrl: null,
+                embeddingDimensions: 1536,
+                embeddingBatchSize: 32,
+                embeddingAutoIndex: false,
                 hasApiKey: true,
               };
             case "premise_list":
@@ -547,6 +552,58 @@ async function installMock(page: import("@playwright/test").Page) {
                   },
                 ],
               };
+            case "embedding_status":
+              return {
+                configured: true,
+                mode: "api",
+                model: "text-embedding-3-small",
+                dimensions: 1536,
+                batchSize: 32,
+                autoIndex: false,
+                ready: 12,
+                stale: 2,
+                pending: 0,
+                error: 0,
+                otherModel: 0,
+              };
+            case "embedding_test":
+              return {
+                ok: true,
+                message: "Embedding 连接成功 · 1536 维 · 模式 api",
+                latencyMs: 120,
+                model: "text-embedding-3-small",
+              };
+            case "embedding_index":
+              return {
+                model: "text-embedding-3-small",
+                dimensions: 1536,
+                indexed: 2,
+                skipped: 12,
+                failed: 0,
+                remaining: 0,
+                canceled: false,
+              };
+            case "embedding_cancel_index":
+              return null;
+            case "hybrid_search":
+              return {
+                hits: [
+                  {
+                    sourceKind: "knowledge",
+                    sourceId: "ke1",
+                    chapterId: null,
+                    excerpt: "旧车站只在雨夜出现，站台钟比现实慢七分钟；林澈在这里找到黄铜钥匙。",
+                    score: 100,
+                    ftsRank: 1,
+                    vectorRank: 2,
+                    graphRank: 1,
+                  },
+                ],
+                retrievalMode: "hybrid",
+                model: "text-embedding-3-small",
+                dimensions: 1536,
+                embeddingError: null,
+              };
             case "candidate_accept":
               agentCandidates = agentCandidates.map((item) =>
                 item.id === args?.id ? { ...item, status: "accepted" } : item,
@@ -617,15 +674,60 @@ async function installMock(page: import("@playwright/test").Page) {
                 {
                   id: "comm1",
                   level: 0,
+                  parentId: null,
+                  communityKey: "community-root",
                   title: "关系簇 · 林澈 / 母亲 / 旧车站",
                   memberIds: ["e1", "e2", "e3"],
                   sourceIds: ["ch01:p1", "ch04:p11"],
                   content: "母亲与旧车站之间存在尚未解释的联系；林澈的调查正在把家庭秘密推向公开。",
                   summaryHash: "hash1",
+                  sourceHash: "source-hash-1",
+                  summaryMode: "deterministic",
                   generatedAt: "2026-10-20T08:00:00Z",
                   staleAt: null,
                 },
               ];
+            case "community_build":
+              return [
+                {
+                  id: "comm1",
+                  level: 0,
+                  parentId: "comm-group",
+                  communityKey: "community-root",
+                  title: "关系簇 · 林澈 / 母亲 / 旧车站",
+                  memberIds: ["e1", "e2", "e3"],
+                  sourceIds: ["ch01:p1", "ch04:p11"],
+                  content: "母亲与旧车站之间存在尚未解释的联系。",
+                  summaryHash: "hash1",
+                  sourceHash: "source-hash-1",
+                  summaryMode: "deterministic",
+                  generatedAt: "2026-10-20T08:00:00Z",
+                  staleAt: null,
+                },
+                {
+                  id: "comm-group",
+                  level: 1,
+                  parentId: null,
+                  communityKey: "community-macro",
+                  title: "叙事网络 L1 · 林澈 / 母亲",
+                  memberIds: ["e1", "e2", "e3"],
+                  sourceIds: ["ch01:p1"],
+                  content: "家庭秘密与调查线共同推动当前局面。",
+                  summaryHash: "hash2",
+                  sourceHash: "source-hash-2",
+                  summaryMode: "deterministic",
+                  generatedAt: "2026-10-20T08:00:00Z",
+                  staleAt: null,
+                },
+              ];
+            case "community_summarize":
+              return {
+                reports: [],
+                compiled: 1,
+                preserved: 1,
+                remaining: 0,
+                failed: [],
+              };
             case "chapter_text_get":
               return "雨落在旧灯上。\n\n林澈把信摊在掌心，纸页的边缘被水汽泡得发软。母亲站在门口，没有进来，也没有说话。\n\n他听见楼下有人在喊父亲的名字。";
             case "scene_list":
@@ -953,11 +1055,14 @@ async function installMock(page: import("@playwright/test").Page) {
                 {
                   id: "wiki1",
                   entityId: "e1",
+                  pageKey: "character:e1",
                   kind: "character",
                   title: "林澈",
                   content:
                     "派生视图 · 非权威事实。事实变更后本页会标记过期，并可全量重建。\n\n## 人物核心\n- 欲望：证明父亲的死并非意外\n- 恐惧：发现自己和父亲一样擅长撒谎\n\n## 已确认事实\n- [world] 林澈 · 持有 · 旧钥匙（ch01:p3）",
                   contentHash: "abcdef1234567890",
+                  sourceHash: "source-character-e1",
+                  compileMode: "deterministic",
                   sourceIds: ["e1", "c1"],
                   sourceSpans: ["ch01:p3｜林澈握住旧钥匙"],
                   generatorVersion: 1,
@@ -968,11 +1073,14 @@ async function installMock(page: import("@playwright/test").Page) {
                 {
                   id: "wiki2",
                   entityId: null,
+                  pageKey: "timeline:project",
                   kind: "timeline",
                   title: "双时间线",
                   content:
                     "派生视图 · 非权威事实。\n\n## 事件\n- 葬礼当夜｜故事时间第1日 23:00｜叙述时间第1章",
                   contentHash: "fedcba0987654321",
+                  sourceHash: "source-timeline",
+                  compileMode: "deterministic",
                   sourceIds: ["ev1"],
                   sourceSpans: ["ch01:p1｜林澈收到下周寄出的信"],
                   generatorVersion: 1,
@@ -981,6 +1089,30 @@ async function installMock(page: import("@playwright/test").Page) {
                   staleAt: "2026-10-20T08:30:00Z",
                 },
               ];
+            case "wiki_dependencies":
+              return [
+                {
+                  pageId: "wiki1",
+                  dependsOnPageId: "wiki2",
+                  reason: "共享双时间线与事件顺序",
+                },
+              ];
+            case "wiki_rebuild":
+            case "wiki_compile_llm":
+              return {
+                pages: [],
+                characters: 1,
+                places: 0,
+                rules: 0,
+                timelines: 1,
+                promises: 0,
+                chapters: 0,
+                preservedAuthorPages: 1,
+                compiled: 0,
+                skipped: 0,
+                remaining: 0,
+                failed: [],
+              };
             case "preference_summary":
               return {
                 choices: 1,
@@ -1122,6 +1254,11 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.screenshot({ path: path.join("test-results", "studio.png") });
 
   await page.getByRole("button", { name: "设定与配置", exact: true }).click();
+  await expect(page.getByText("可选 Embedding")).toBeVisible();
+  await expect(page.getByText("就绪 12")).toBeVisible();
+  await page.getByRole("button", { name: "重建索引" }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: path.join("test-results", "embedding-config.png") });
   await page.getByRole("button", { name: "文笔", exact: true }).click();
   await page.waitForTimeout(450);
   await page.screenshot({ path: path.join("test-results", "style.png") });
@@ -1138,6 +1275,14 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "关系图", exact: true }).click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: path.join("test-results", "graph.png") });
+  await page.getByRole("button", { name: "全书洞察", exact: true }).click();
+  await page
+    .getByPlaceholder("例如：阿澈为什么不再相信守夜人？")
+    .fill("阿澈为什么不相信守夜人");
+  await page.getByRole("button", { name: "检索证据" }).click();
+  await expect(page.getByText("FTS + 向量 + 图谱", { exact: false })).toBeVisible();
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: path.join("test-results", "hybrid-search.png") });
 });
 
 test("agent workbench fits both desktop review sizes", async ({ page }) => {

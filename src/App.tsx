@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { AuditPage } from "@/features/audit/AuditPage";
 import { CanonPage } from "@/features/canon/CanonPage";
@@ -37,6 +37,7 @@ export default function App() {
   const setNav = useAppStore((s) => s.setNav);
   const notify = useAppStore((s) => s.notify);
   const [bootError, setBootError] = useState<string | null>(null);
+  const autoIndexedProject = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,6 +63,27 @@ export default function App() {
     const timer = window.setTimeout(() => notify(null), 2800);
     return () => window.clearTimeout(timer);
   }, [toast, notify]);
+
+  useEffect(() => {
+    if (!project) {
+      autoIndexedProject.current = null;
+      return;
+    }
+    if (
+      !model?.embeddingAutoIndex ||
+      model.embeddingMode === "off" ||
+      autoIndexedProject.current === project.project.id
+    ) {
+      return;
+    }
+    autoIndexedProject.current = project.project.id;
+    const timer = window.setTimeout(() => {
+      void ipc.embeddingIndex(false).catch(() => {
+        // Automatic indexing is best-effort; retrieval falls back to FTS + PPR.
+      });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [model?.embeddingAutoIndex, model?.embeddingMode, project]);
 
   if (!ready) {
     return (

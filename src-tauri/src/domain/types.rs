@@ -58,8 +58,22 @@ pub struct ModelConfig {
     pub model: String,
     pub temperature: f64,
     pub max_tokens: i32,
+    #[serde(default)]
+    pub embedding_mode: String,
     pub embedding_model: Option<String>,
+    #[serde(default)]
+    pub embedding_base_url: Option<String>,
+    #[serde(default)]
+    pub embedding_dimensions: Option<i32>,
+    #[serde(default = "default_embedding_batch_size")]
+    pub embedding_batch_size: i32,
+    #[serde(default)]
+    pub embedding_auto_index: bool,
     pub has_api_key: bool,
+}
+
+fn default_embedding_batch_size() -> i32 {
+    32
 }
 
 impl Default for ModelConfig {
@@ -69,7 +83,12 @@ impl Default for ModelConfig {
             model: "gpt-4o-mini".into(),
             temperature: 0.8,
             max_tokens: 4096,
+            embedding_mode: "off".into(),
             embedding_model: None,
+            embedding_base_url: None,
+            embedding_dimensions: None,
+            embedding_batch_size: default_embedding_batch_size(),
+            embedding_auto_index: false,
             has_api_key: false,
         }
     }
@@ -82,7 +101,17 @@ pub struct ModelConfigInput {
     pub model: String,
     pub temperature: f64,
     pub max_tokens: i32,
+    #[serde(default)]
+    pub embedding_mode: String,
     pub embedding_model: Option<String>,
+    #[serde(default)]
+    pub embedding_base_url: Option<String>,
+    #[serde(default)]
+    pub embedding_dimensions: Option<i32>,
+    #[serde(default = "default_embedding_batch_size")]
+    pub embedding_batch_size: i32,
+    #[serde(default)]
+    pub embedding_auto_index: bool,
     pub api_key: Option<String>,
 }
 

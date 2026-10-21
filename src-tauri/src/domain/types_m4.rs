@@ -54,11 +54,15 @@ pub struct GraphData {
 pub struct CommunityReport {
     pub id: String,
     pub level: i32,
+    pub parent_id: Option<String>,
+    pub community_key: String,
     pub title: String,
     pub member_ids: Vec<String>,
     pub source_ids: Vec<String>,
     pub content: String,
     pub summary_hash: String,
+    pub source_hash: String,
+    pub summary_mode: String,
     pub generated_at: String,
     pub stale_at: Option<String>,
 }
@@ -70,6 +74,19 @@ pub struct InsightResult {
     pub answer: String,
     pub source_ids: Vec<String>,
     pub community_ids: Vec<String>,
+    pub entity_ids: Vec<String>,
+    pub retrieval_mode: String,
+    pub embedding_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommunitySummaryResult {
+    pub reports: Vec<CommunityReport>,
+    pub compiled: i32,
+    pub preserved: i32,
+    pub remaining: i32,
+    pub failed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 10;
 
 const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "init", include_str!("../../migrations/001_init.sql")),
@@ -42,6 +42,16 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         8,
         "agent_runtime",
         include_str!("../../migrations/008_agent_runtime.sql"),
+    ),
+    (
+        9,
+        "optional_embeddings",
+        include_str!("../../migrations/009_optional_embeddings.sql"),
+    ),
+    (
+        10,
+        "graph_wiki_hierarchy",
+        include_str!("../../migrations/010_graph_wiki_hierarchy.sql"),
     ),
 ];
 
@@ -128,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_v7_project_to_agent_runtime_without_losing_candidates() {
+    fn upgrades_v7_project_through_agent_and_embedding_without_losing_candidates() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE schema_migration (
@@ -152,7 +162,10 @@ mod tests {
              VALUES ('p','旧项目','/tmp/old',7,'zh-CN','both','now','now');
              INSERT INTO candidate
              (id,project_id,kind,payload,confidence,risk_level,status,created_at)
-             VALUES ('c','p','entity','{}',0.5,'L1','pending','now');",
+             VALUES ('c','p','entity','{}',0.5,'L1','pending','now');
+             INSERT INTO wiki_page
+             (id,project_id,entity_id,kind,title,content,content_hash,source_ids,generated_at,stale_at)
+             VALUES ('w','p',NULL,'timeline','旧时间线','旧内容','wh','[]','now',NULL);",
         )
         .unwrap();
 
@@ -179,6 +192,42 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema, 8);
+        assert_eq!(schema, 10);
+        let embedding_columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('embedding')
+                 WHERE name IN ('content','content_hash','status','branch_id','updated_at')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(embedding_columns, 5);
+        let graph_columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('graph_community')
+                 WHERE name IN ('parent_id','community_key','source_hash','summary_mode')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(graph_columns, 4);
+        let wiki_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name='wiki_page_dependency'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(wiki_tables, 1);
+        let (page_key, source_hash): (String, String) = conn
+            .query_row(
+                "SELECT page_key, source_hash FROM wiki_page WHERE id='w'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(page_key, "w");
+        assert_eq!(source_hash, "wh");
     }
 }

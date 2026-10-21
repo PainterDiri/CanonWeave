@@ -7,6 +7,7 @@ import {
   Pencil,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import {
   Badge,
@@ -28,11 +29,15 @@ const kindMeta: Record<string, { label: string; short: string }> = {
   timeline: { label: "时间线", short: "时间" },
   promise: { label: "伏笔", short: "伏笔" },
   chapter: { label: "章节摘要", short: "章节" },
+  knowledge: { label: "知识条目", short: "知识" },
 };
 
 export function WikiPageView() {
   const [pages, setPages] = useState<WikiPage[]>([]);
   const [pendingEdits, setPendingEdits] = useState<Candidate[]>([]);
+  const [dependencies, setDependencies] = useState<
+    Awaited<ReturnType<typeof ipc.wikiDependencies>>
+  >([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [kind, setKind] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -45,12 +50,14 @@ export function WikiPageView() {
 
   const load = useCallback(async () => {
     try {
-      const [pageList, pending] = await Promise.all([
+      const [pageList, pending, dependencyList] = await Promise.all([
         ipc.wikiList(),
         ipc.candidateList("pending", "wiki_edit"),
+        ipc.wikiDependencies(),
       ]);
       setPages(pageList);
       setPendingEdits(pending);
+      setDependencies(dependencyList);
       setSelectedId((current) =>
         current && pageList.some((page) => page.id === current)
           ? current
@@ -73,11 +80,32 @@ export function WikiPageView() {
     try {
       const result = await ipc.wikiRebuild();
       setPages(result.pages);
+      setDependencies(await ipc.wikiDependencies());
       setSelectedId(result.pages[0]?.id ?? null);
       notify(
-        `百科已全量重建：${result.characters} 人物 / ${result.places} 地点 / ${result.rules} 规则 / ${result.chapters} 章节`,
+        `百科已重建：${result.characters} 人物 / ${result.places} 地点 / ${result.rules} 规则 / ${result.chapters} 章节 · 保留 ${result.preservedAuthorPages} 个作者页`,
       );
       await refreshProject();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const compileChapters = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await ipc.wikiCompileLlm(4);
+      setPages(result.pages);
+      setDependencies(await ipc.wikiDependencies());
+      notify(
+        `模型编译章节摘要 ${result.compiled} 页；跳过 ${result.skipped} 页，剩余 ${result.remaining} 页`,
+      );
+      if (result.failed.length) {
+        setError(`部分章节未更新：${result.failed.slice(0, 3).join("；")}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -92,6 +120,9 @@ export function WikiPageView() {
   const current = filtered.find((page) => page.id === selectedId) ?? filtered[0] ?? null;
   const pageEdits = pendingEdits.filter(
     (candidate) => candidate.payload.pageId === current?.id,
+  );
+  const pageDependencies = dependencies.filter(
+    (dependency) => dependency.pageId === current?.id,
   );
 
   const proposeEdit = async () => {
@@ -138,15 +169,27 @@ export function WikiPageView() {
         eyebrow="Narrative Wiki Compiler"
         title="叙事百科"
         action={
-          <Button
-            size="sm"
-            tone="primary"
-            onClick={() => void rebuild()}
-            disabled={busy}
-            icon={busy ? <LoaderCircle size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          >
-            全量重建
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => void compileChapters()}
+              disabled={busy}
+              icon={<Sparkles size={12} />}
+            >
+              AI 编译章节
+            </Button>
+            <Button
+              size="sm"
+              tone="primary"
+              onClick={() => void rebuild()}
+              disabled={busy}
+              icon={
+                busy ? <LoaderCircle size={12} className="animate-spin" /> : <RefreshCw size={12} />
+              }
+            >
+              重建并合并
+            </Button>
+          </div>
         }
       />
       <div className="mb-5 flex flex-wrap items-center gap-1.5 border-b border-line pb-3">
@@ -233,6 +276,13 @@ export function WikiPageView() {
                       {current.staleAt ? "已过期" : "新鲜"}
                     </Badge>
                     {current.editedByAuthor ? <Badge tone="amber">作者修订</Badge> : null}
+                    <Badge tone={current.compileMode === "llm" ? "teal" : "neutral"}>
+                      {current.compileMode === "llm"
+                        ? "模型摘要"
+                        : current.compileMode === "author"
+                          ? "作者编译"
+                          : "确定性"}
+                    </Badge>
                   </div>
                   <div className="mt-1.5 font-mono text-[9px] text-muted">
                     {kindMeta[current.kind]?.label ?? current.kind} · hash {current.contentHash.slice(0, 16)} · generator v
@@ -298,6 +348,37 @@ export function WikiPageView() {
                       </button>
                     ))}
                   </div>
+                </div>
+                <div className="mt-5 border-t border-line pt-4">
+                  <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold text-ink-soft">
+                    <BookOpen size={12} className="text-teal" /> 页面依赖
+                  </div>
+                  {pageDependencies.length ? (
+                    <div className="space-y-1.5">
+                      {pageDependencies.map((dependency) => {
+                        const target = pages.find(
+                          (page) => page.id === dependency.dependsOnPageId,
+                        );
+                        return (
+                          <button
+                            key={dependency.dependsOnPageId}
+                            onClick={() => {
+                              setKind("all");
+                              setSelectedId(dependency.dependsOnPageId);
+                            }}
+                            className="flex w-full items-center justify-between rounded-lg border border-line bg-paper px-3 py-2 text-left hover:border-teal/30"
+                          >
+                            <span className="text-[10px] text-ink-soft">
+                              {target?.title ?? dependency.dependsOnPageId}
+                            </span>
+                            <span className="text-[8.5px] text-muted">{dependency.reason}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="text-[9.5px] text-muted">当前页面没有可解析的页间依赖。</div>
+                  )}
                 </div>
               </div>
             </section>

@@ -169,10 +169,13 @@ export const commands = {
 	graphData: () => typedError<GraphData, string>(__TAURI_INVOKE("graph_data")),
 	communityBuild: () => typedError<CommunityReport[], string>(__TAURI_INVOKE("community_build")),
 	communityList: () => typedError<CommunityReport[], string>(__TAURI_INVOKE("community_list")),
+	communitySummarize: () => typedError<CommunitySummaryResult, string>(__TAURI_INVOKE("community_summarize")),
 	impactAnalysis: (entityId: string) => typedError<ImpactSet, string>(__TAURI_INVOKE("impact_analysis", { entityId })),
 	insightQuery: (question: string) => typedError<InsightResult, string>(__TAURI_INVOKE("insight_query", { question })),
 	wikiList: () => typedError<WikiPage[], string>(__TAURI_INVOKE("wiki_list")),
 	wikiRebuild: () => typedError<WikiRebuildResult, string>(__TAURI_INVOKE("wiki_rebuild")),
+	wikiDependencies: () => typedError<WikiPageDependency[], string>(__TAURI_INVOKE("wiki_dependencies")),
+	wikiCompileLlm: (limit: number | null) => typedError<WikiLlmCompileResult, string>(__TAURI_INVOKE("wiki_compile_llm", { limit })),
 	wikiProposeEdit: (input: WikiEditInput) => typedError<Candidate, string>(__TAURI_INVOKE("wiki_propose_edit", { input })),
 	voiceSampleList: (characterId: string) => typedError<CharacterVoiceSample[], string>(__TAURI_INVOKE("voice_sample_list", { characterId })),
 	voiceSampleAdd: (input: VoiceSampleInput) => typedError<CharacterVoiceSample, string>(__TAURI_INVOKE("voice_sample_add", { input })),
@@ -193,6 +196,11 @@ export const commands = {
 	agentRunResume: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_resume", { id })),
 	agentRunRetryStep: (runId: string, stepId: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_retry_step", { runId, stepId })),
 	agentFoundation: () => typedError<FoundationReport, string>(__TAURI_INVOKE("agent_foundation")),
+	embeddingStatus: () => typedError<EmbeddingStatus, string>(__TAURI_INVOKE("embedding_status")),
+	embeddingTest: () => typedError<ModelTestResult, string>(__TAURI_INVOKE("embedding_test")),
+	embeddingIndex: (rebuild: boolean) => typedError<EmbeddingIndexResult, string>(__TAURI_INVOKE("embedding_index", { rebuild })),
+	embeddingCancelIndex: () => typedError<null, string>(__TAURI_INVOKE("embedding_cancel_index")),
+	hybridSearch: (query: string, limit: number | null) => typedError<HybridSearchResult, string>(__TAURI_INVOKE("hybrid_search", { query, limit })),
 };
 
 /* Types */
@@ -494,13 +502,25 @@ export type ChatSessionCreateInput = {
 export type CommunityReport = {
 	id: string,
 	level: number,
+	parentId: string | null,
+	communityKey: string,
 	title: string,
 	memberIds: string[],
 	sourceIds: string[],
 	content: string,
 	summaryHash: string,
+	sourceHash: string,
+	summaryMode: string,
 	generatedAt: string,
 	staleAt: string | null,
+};
+
+export type CommunitySummaryResult = {
+	reports: CommunityReport[],
+	compiled: number,
+	preserved: number,
+	remaining: number,
+	failed: string[],
 };
 
 export type ConflictCertificate = {
@@ -518,6 +538,8 @@ export type ContextPreview = {
 	totalChars: number,
 	budget: number,
 	contextHash: string,
+	retrievalMode: string,
+	embeddingError: string | null,
 };
 
 export type ContextSection = {
@@ -539,6 +561,30 @@ export type DraftAcceptResult = {
 	chapterId: string,
 	revisionId: string,
 	snapshotId: string,
+};
+
+export type EmbeddingIndexResult = {
+	model: string,
+	dimensions: number,
+	indexed: number,
+	skipped: number,
+	failed: number,
+	remaining: number,
+	canceled: boolean,
+};
+
+export type EmbeddingStatus = {
+	configured: boolean,
+	mode: string,
+	model: string | null,
+	dimensions: number | null,
+	batchSize: number,
+	autoIndex: boolean,
+	ready: number,
+	stale: number,
+	pending: number,
+	error: number,
+	otherModel: number,
 };
 
 export type EmotionBeat = {
@@ -636,6 +682,25 @@ export type GraphNode = {
 	community: number | null,
 };
 
+export type HybridSearchHit = {
+	sourceKind: string,
+	sourceId: string,
+	chapterId: string | null,
+	excerpt: string,
+	score: number,
+	ftsRank: number | null,
+	vectorRank: number | null,
+	graphRank: number | null,
+};
+
+export type HybridSearchResult = {
+	hits: HybridSearchHit[],
+	retrievalMode: string,
+	model: string | null,
+	dimensions: number | null,
+	embeddingError: string | null,
+};
+
 export type ImpactItem = {
 	kind: string,
 	id: string,
@@ -660,6 +725,9 @@ export type InsightResult = {
 	answer: string,
 	sourceIds: string[],
 	communityIds: string[],
+	entityIds: string[],
+	retrievalMode: string,
+	embeddingError: string | null,
 };
 
 export type IssueActionInput = {
@@ -724,7 +792,12 @@ export type ModelConfig = {
 	model: string,
 	temperature: number | null,
 	maxTokens: number,
+	embeddingMode?: string,
 	embeddingModel: string | null,
+	embeddingBaseUrl?: string | null,
+	embeddingDimensions?: number | null,
+	embeddingBatchSize?: number,
+	embeddingAutoIndex?: boolean,
 	hasApiKey: boolean,
 };
 
@@ -733,7 +806,12 @@ export type ModelConfigInput = {
 	model: string,
 	temperature: number | null,
 	maxTokens: number,
+	embeddingMode?: string,
 	embeddingModel: string | null,
+	embeddingBaseUrl?: string | null,
+	embeddingDimensions?: number | null,
+	embeddingBatchSize?: number,
+	embeddingAutoIndex?: boolean,
 	apiKey: string | null,
 };
 
@@ -1487,19 +1565,36 @@ export type WikiEditInput = {
 	content: string,
 };
 
+export type WikiLlmCompileResult = {
+	pages: WikiPage[],
+	compiled: number,
+	skipped: number,
+	remaining: number,
+	failed: string[],
+};
+
 export type WikiPage = {
 	id: string,
 	entityId: string | null,
+	pageKey: string,
 	kind: string,
 	title: string,
 	content: string,
 	contentHash: string,
+	sourceHash: string,
+	compileMode: string,
 	sourceIds: string[],
 	sourceSpans: string[],
 	generatorVersion: number,
 	editedByAuthor: boolean,
 	generatedAt: string,
 	staleAt: string | null,
+};
+
+export type WikiPageDependency = {
+	pageId: string,
+	dependsOnPageId: string,
+	reason: string,
 };
 
 export type WikiRebuildResult = {
@@ -1510,6 +1605,7 @@ export type WikiRebuildResult = {
 	timelines: number,
 	promises: number,
 	chapters: number,
+	preservedAuthorPages: number,
 };
 
 /* Tauri Specta runtime */
