@@ -38,6 +38,15 @@ CanonWeave 是一个本地优先的长篇叙事创作工具。它帮助作者管
 
 > 截图使用测试项目数据，仅用于展示界面。
 
+## 开发文档
+
+- [文档导航](docs/README.md)
+- [当前工程交接](docs/handoffs/2026-10-21-current-state.md)
+- [当前架构](docs/ARCHITECTURE.md)
+- [数据模型](docs/DATA_MODEL.md)
+- [开发规格](叙事织网_开发文档.md)
+- [开发进度](开发进度.md)
+
 ## 快速启动
 
 需要 Node.js 20.19+ 或 22.12+、Rust 1.77+，以及 Tauri 对应的系统依赖。

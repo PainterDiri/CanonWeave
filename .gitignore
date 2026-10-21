@@ -97,7 +97,3 @@ temp/
 
 # TypeScript build info
 *.tsbuildinfo
-
-# Internal development notes
-/叙事织网_开发文档.md
-/开发进度.md
