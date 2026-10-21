@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "init", include_str!("../../migrations/001_init.sql")),
@@ -37,6 +37,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         7,
         "narrative_blueprint",
         include_str!("../../migrations/007_narrative_blueprint.sql"),
+    ),
+    (
+        8,
+        "agent_runtime",
+        include_str!("../../migrations/008_agent_runtime.sql"),
     ),
 ];
 
@@ -120,5 +125,60 @@ mod tests {
              SELECT * FROM t WHERE t MATCH '旧灯';",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn upgrades_v7_project_to_agent_runtime_without_losing_candidates() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migration (
+               version INTEGER PRIMARY KEY,
+               name TEXT NOT NULL,
+               applied_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        for (version, name, sql) in MIGRATIONS.iter().take(7) {
+            conn.execute_batch(sql).unwrap();
+            conn.execute(
+                "INSERT INTO schema_migration (version, name, applied_at) VALUES (?1,?2,'now')",
+                rusqlite::params![version, name],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO project
+             (id,name,root_path,schema_version,writing_language,mode,created_at,updated_at)
+             VALUES ('p','旧项目','/tmp/old',7,'zh-CN','both','now','now');
+             INSERT INTO candidate
+             (id,project_id,kind,payload,confidence,risk_level,status,created_at)
+             VALUES ('c','p','entity','{}',0.5,'L1','pending','now');",
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        let candidate_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM candidate WHERE id='c'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(candidate_count, 1);
+        let agent_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name IN ('agent_run','agent_step','agent_evidence')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent_tables, 3);
+        let schema: i32 = conn
+            .query_row(
+                "SELECT schema_version FROM project WHERE id='p'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(schema, 8);
     }
 }

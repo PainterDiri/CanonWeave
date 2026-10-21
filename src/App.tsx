@@ -108,7 +108,7 @@ export default function App() {
         <Suspense
           fallback={
             <div className="flex h-64 items-center justify-center text-[12px] text-muted">
-              正在打开协作助手…
+              正在打开 Agent…
             </div>
           }
         >

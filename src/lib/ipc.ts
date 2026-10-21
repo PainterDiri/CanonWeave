@@ -27,6 +27,7 @@ import {
   type KnowledgeEntryInput,
   type NarrativeGenerateInput,
   type NarrativeBlueprintEditInput,
+  type AgentRunCreateInput,
 } from "./bindings";
 
 export type {
@@ -115,6 +116,14 @@ export type {
   NarrativePresentation,
   NarrativeDiagnostic,
   NarrativeBlueprintEditInput,
+  AgentRun,
+  AgentRunCreateInput,
+  AgentRunDetail,
+  AgentStep,
+  AgentEvidence,
+  AgentToolDefinition,
+  FoundationReport,
+  FoundationCheck,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -433,6 +442,26 @@ export const ipc = {
     guarded(async () => unwrap(await commands.motifDensityCheck(sceneId, text))),
   exportProject: (input: ExportInput) =>
     guarded(async () => unwrap(await commands.exportProject(input))),
+
+  agentTools: () => guarded(async () => commands.agentTools()),
+  agentRuns: (limit: number | null = 40) =>
+    guarded(async () => unwrap(await commands.agentRuns(limit))),
+  agentRunCreate: (input: AgentRunCreateInput) =>
+    guarded(async () => unwrap(await commands.agentRunCreate(input))),
+  agentRunGet: (id: string) =>
+    guarded(async () => unwrap(await commands.agentRunGet(id))),
+  agentRunExecute: (id: string) =>
+    guarded(async () => unwrap(await commands.agentRunExecute(id))),
+  agentRunPause: (id: string) =>
+    guarded(async () => unwrap(await commands.agentRunPause(id))),
+  agentRunCancel: (id: string) =>
+    guarded(async () => unwrap(await commands.agentRunCancel(id))),
+  agentRunResume: (id: string) =>
+    guarded(async () => unwrap(await commands.agentRunResume(id))),
+  agentRunRetryStep: (runId: string, stepId: string) =>
+    guarded(async () => unwrap(await commands.agentRunRetryStep(runId, stepId))),
+  agentFoundation: () =>
+    guarded(async () => unwrap(await commands.agentFoundation())),
 };
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };
@@ -473,6 +502,21 @@ export async function onGenerationError(
 ): Promise<() => void> {
   if (!isTauri()) return () => {};
   return listen<GenerationErrorEvent>("generation://error", (event) => handler(event.payload));
+}
+
+export type AgentProgressEvent = {
+  runId: string;
+  status: string;
+  currentStep: number;
+  totalSteps: number;
+  message: string;
+};
+
+export async function onAgentProgress(
+  handler: (event: AgentProgressEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<AgentProgressEvent>("agent://progress", (event) => handler(event.payload));
 }
 
 export { commands };

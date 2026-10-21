@@ -176,6 +176,8 @@ pub struct Candidate {
     pub risk_level: String,
     pub status: String,
     pub batch_id: Option<String>,
+    pub agent_run_id: Option<String>,
+    pub agent_step_id: Option<String>,
     pub created_at: String,
     pub confirmed_at: Option<String>,
 }

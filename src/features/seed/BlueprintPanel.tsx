@@ -14,6 +14,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { Badge, Button, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
+import { AgentSuggestion } from "@/components/AgentSuggestion";
 import {
   ipc,
   type NarrativeBlueprint,
@@ -214,6 +215,7 @@ export function BlueprintPanel({
 
   return (
     <div className="space-y-5">
+      <AgentSuggestion outputs={["all", "outline", "knowledge"]} />
       {!confirmed ? null : (
         <section className="rounded-xl border border-teal/25 bg-teal-soft/40 px-4 py-3">
           <div className="flex items-center gap-2 text-[12px] text-teal">

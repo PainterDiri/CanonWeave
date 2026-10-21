@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -12,6 +13,48 @@ const KEYRING_SERVICE: &str = "com.canonweave.app";
 const KEYRING_ACCOUNT: &str = "openai-compatible-api-key";
 const CONFIG_FILE: &str = "model.json";
 
+#[derive(Default)]
+struct ApiKeyCacheState {
+    loaded: bool,
+    value: Option<String>,
+}
+
+pub struct ApiKeyCache {
+    state: Mutex<ApiKeyCacheState>,
+}
+
+impl Default for ApiKeyCache {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(ApiKeyCacheState::default()),
+        }
+    }
+}
+
+impl ApiKeyCache {
+    pub fn get(&self) -> AppResult<Option<String>> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AppError::Message("API Key 缓存锁已损坏".into()))?;
+        if !state.loaded {
+            state.value = load_api_key()?;
+            state.loaded = true;
+        }
+        Ok(state.value.clone())
+    }
+
+    pub fn set(&self, key: String) -> AppResult<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| AppError::Message("API Key 缓存锁已损坏".into()))?;
+        state.value = Some(key);
+        state.loaded = true;
+        Ok(())
+    }
+}
+
 pub struct ModelStore {
     path: PathBuf,
 }
@@ -24,18 +67,30 @@ impl ModelStore {
     }
 
     pub fn load(&self) -> ModelConfig {
+        self.read_file().unwrap_or_default()
+    }
+
+    pub fn mark_api_key_present(&self, present: bool) -> AppResult<()> {
+        let mut config = self.load();
+        if config.has_api_key == present {
+            return Ok(());
+        }
+        config.has_api_key = present;
+        self.write_file(&config)
+    }
+
+    fn read_file(&self) -> Option<ModelConfig> {
         std::fs::read_to_string(&self.path)
             .ok()
             .and_then(|raw| serde_json::from_str::<ModelConfig>(&raw).ok())
-            .map(|mut config| {
-                config.has_api_key = load_api_key().ok().flatten().is_some();
-                config
-            })
-            .unwrap_or_else(|| {
-                let mut config = ModelConfig::default();
-                config.has_api_key = load_api_key().ok().flatten().is_some();
-                config
-            })
+    }
+
+    fn write_file(&self, config: &ModelConfig) -> AppResult<()> {
+        if let Some(dir) = self.path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&self.path, serde_json::to_string_pretty(config)?)?;
+        Ok(())
     }
 
     pub fn save(&self, input: &ModelConfigInput) -> AppResult<ModelConfig> {
@@ -45,13 +100,15 @@ impl ModelStore {
         if input.model.trim().is_empty() {
             return Err(AppError::Message("模型名不能为空".into()));
         }
+        let mut has_api_key = self.load().has_api_key;
         if let Some(key) = input.api_key.as_deref() {
             let key = key.trim();
             if !key.is_empty() {
                 save_api_key(key)?;
+                has_api_key = true;
             }
         }
-        let mut config = ModelConfig {
+        let config = ModelConfig {
             base_url: input.base_url.trim().trim_end_matches('/').to_string(),
             model: input.model.trim().to_string(),
             temperature: input.temperature.clamp(0.0, 2.0),
@@ -60,13 +117,9 @@ impl ModelStore {
                 .embedding_model
                 .clone()
                 .filter(|v| !v.trim().is_empty()),
-            has_api_key: false,
+            has_api_key,
         };
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&self.path, serde_json::to_string_pretty(&config)?)?;
-        config.has_api_key = load_api_key()?.is_some();
+        self.write_file(&config)?;
         Ok(config)
     }
 }
@@ -79,7 +132,7 @@ pub fn save_api_key(key: &str) -> AppResult<()> {
         .map_err(|e| AppError::Message(format!("写入系统钥匙串失败：{e}")))
 }
 
-pub fn load_api_key() -> AppResult<Option<String>> {
+fn load_api_key() -> AppResult<Option<String>> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
         .map_err(|e| AppError::Message(format!("无法访问系统钥匙串：{e}")))?;
     match entry.get_password() {
@@ -98,22 +151,14 @@ pub fn chat_completions_url(base_url: &str) -> String {
     }
 }
 
-pub async fn test_connection(config: &ModelConfig) -> ModelTestResult {
+pub async fn test_connection(config: &ModelConfig, key: Option<&str>) -> ModelTestResult {
     let started = Instant::now();
-    let key = match load_api_key() {
-        Ok(Some(key)) => key,
-        Ok(None) => {
+    let key = match key {
+        Some(key) => key,
+        None => {
             return ModelTestResult {
                 ok: false,
                 message: "尚未保存 API Key".into(),
-                latency_ms: started.elapsed().as_millis() as u32,
-                model: config.model.clone(),
-            }
-        }
-        Err(e) => {
-            return ModelTestResult {
-                ok: false,
-                message: e.to_string(),
                 latency_ms: started.elapsed().as_millis() as u32,
                 model: config.model.clone(),
             }
@@ -195,24 +240,51 @@ mod tests {
     fn config_file_never_contains_api_key() {
         let dir = tempfile::tempdir().unwrap();
         let store = ModelStore::new(dir.path());
-        // Save config through a direct write path, since the keyring is unavailable in CI.
         let config = ModelConfig {
             base_url: "http://localhost:1234/v1".into(),
             model: "local".into(),
             temperature: 0.7,
             max_tokens: 512,
             embedding_model: None,
-            has_api_key: false,
+            has_api_key: true,
         };
-        std::fs::write(
-            dir.path().join(CONFIG_FILE),
-            serde_json::to_string(&config).unwrap(),
-        )
-        .unwrap();
+        store.write_file(&config).unwrap();
         let loaded = store.load();
         assert_eq!(loaded.model, "local");
+        assert!(loaded.has_api_key);
         let raw = std::fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
         assert!(!raw.contains("sk-"));
+        assert!(!raw.contains("api_key"));
+    }
+
+    #[test]
+    fn saving_model_settings_without_new_key_preserves_presence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ModelStore::new(dir.path());
+        let existing = ModelConfig {
+            base_url: "http://localhost:1234/v1".into(),
+            model: "local".into(),
+            temperature: 0.7,
+            max_tokens: 512,
+            embedding_model: None,
+            has_api_key: true,
+        };
+        store.write_file(&existing).unwrap();
+
+        let saved = store
+            .save(&ModelConfigInput {
+                base_url: "http://localhost:5678/v1".into(),
+                model: "updated".into(),
+                temperature: 0.5,
+                max_tokens: 1024,
+                embedding_model: None,
+                api_key: None,
+            })
+            .unwrap();
+
+        assert!(saved.has_api_key);
+        assert!(store.load().has_api_key);
+        let raw = std::fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
         assert!(!raw.contains("api_key"));
     }
 }

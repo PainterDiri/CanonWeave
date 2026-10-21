@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Feather, LoaderCircle, Plus, ShieldCheck } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
+import { AgentSuggestion } from "@/components/AgentSuggestion";
 import { ipc, type PayoffCheck, type PromiseRecord } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 
@@ -132,6 +133,7 @@ export function PromisesPage() {
           </Button>
         }
       />
+      <AgentSuggestion outputs={["all", "promises", "timeline"]} />
       {error ? (
         <div className="mb-4 rounded-lg border border-coral/25 bg-coral-soft/60 px-4 py-2.5 text-[12px] text-coral">
           {error}

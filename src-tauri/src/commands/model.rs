@@ -16,7 +16,16 @@ pub fn model_get(state: State<'_, AppState>) -> ModelConfig {
 #[tauri::command]
 #[specta::specta]
 pub fn model_save(state: State<'_, AppState>, input: ModelConfigInput) -> IpcResult<ModelConfig> {
+    let updated_key = input
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(str::to_owned);
     let config = state.model_store.save(&input).map_err(|e| e.to_string())?;
+    if let Some(key) = updated_key {
+        state.api_keys.set(key).map_err(|e| e.to_string())?;
+    }
     if let Ok(mut guard) = state.model.lock() {
         *guard = config.clone();
     }
@@ -27,5 +36,6 @@ pub fn model_save(state: State<'_, AppState>, input: ModelConfigInput) -> IpcRes
 #[specta::specta]
 pub async fn model_test(state: State<'_, AppState>) -> IpcResult<ModelTestResult> {
     let config = state.model_store.load();
-    Ok(model::test_connection(&config).await)
+    let key = state.api_key().map_err(|e| e.to_string())?;
+    Ok(model::test_connection(&config, key.as_deref()).await)
 }

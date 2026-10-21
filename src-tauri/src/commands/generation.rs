@@ -8,13 +8,17 @@ use tauri::{Emitter, Manager, State};
 use crate::{
     candidates, chat, context,
     domain::{
-        BeatOption, Candidate, EmotionBeat, GenerationDelta, GenerationError,
-        GenerationFinished, GenerationInput, GenerationRunRow, GenerationStartResult, PlotBeatsInput,
-        SceneRecord, SensoryPlan,
+        BeatOption, Candidate, EmotionBeat, GenerationDelta, GenerationError, GenerationFinished,
+        GenerationInput, GenerationRunRow, GenerationStartResult, PlotBeatsInput, SceneRecord,
+        SensoryPlan,
     },
+    entities,
     error::IpcResult,
+    fact_delta,
     llm::{parse_json_loose, ChatTurn, LlmClient},
-    entities, fact_delta, scenes, seed, state::AppState, style,
+    scenes, seed,
+    state::AppState,
+    style,
 };
 
 fn generation_system_prompt() -> &'static str {
@@ -40,7 +44,8 @@ pub fn generation_start(
         return Err("生成模式必须是 quick 或 refined".into());
     }
     let config = state.model_store.load();
-    let key = crate::model::load_api_key()
+    let key = state
+        .api_key()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "尚未保存 API Key，请先在设置中填写并测试连接".to_string())?;
     let (project_id, scene, chapter, preview, style_version, style_profile, entity_names) = {
@@ -328,7 +333,11 @@ fn finish_error(app: &tauri::AppHandle, run_id: &str, error: &str) {
     let state = app.state::<AppState>();
     if let Ok(guard) = state.project.lock() {
         if let Some(loaded) = guard.as_ref() {
-            let status = if error.contains("取消") { "canceled" } else { "error" };
+            let status = if error.contains("取消") {
+                "canceled"
+            } else {
+                "error"
+            };
             let _ = loaded.conn.execute(
                 "UPDATE generation_run SET status=?2, error=?3 WHERE id=?1",
                 rusqlite::params![run_id, status, error],
@@ -401,7 +410,8 @@ pub async fn plot_beats(
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let session = chat::get(&loaded.conn, &pid, &input.session_id).map_err(|e| e.to_string())?;
+        let session =
+            chat::get(&loaded.conn, &pid, &input.session_id).map_err(|e| e.to_string())?;
         let messages = chat::history_window(&loaded.conn, &pid, &input.session_id, 10)
             .map_err(|e| e.to_string())?;
         let premise = seed::active(&loaded.conn, &pid)
@@ -514,18 +524,15 @@ pub fn scene_from_beat(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn chat_continue(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> IpcResult<Candidate> {
+pub async fn chat_continue(state: State<'_, AppState>, session_id: String) -> IpcResult<Candidate> {
     let client = super::seed::require_client(&state).map_err(|e| e.to_string())?;
     let (project_id, session, messages, premise) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
         let session = chat::get(&loaded.conn, &pid, &session_id).map_err(|e| e.to_string())?;
-        let messages = chat::history_window(&loaded.conn, &pid, &session_id, 8)
-            .map_err(|e| e.to_string())?;
+        let messages =
+            chat::history_window(&loaded.conn, &pid, &session_id, 8).map_err(|e| e.to_string())?;
         let premise = seed::active(&loaded.conn, &pid)
             .map_err(|e| e.to_string())?
             .and_then(|p| serde_json::to_value(p).ok());
@@ -607,8 +614,8 @@ pub async fn chat_to_scene(
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let messages = chat::history_window(&loaded.conn, &pid, &session_id, 10)
-            .map_err(|e| e.to_string())?;
+        let messages =
+            chat::history_window(&loaded.conn, &pid, &session_id, 10).map_err(|e| e.to_string())?;
         (pid, messages)
     };
     let mut transcript = String::new();
@@ -662,4 +669,3 @@ pub async fn chat_to_scene(
     )
     .map_err(|e| e.to_string())
 }
-

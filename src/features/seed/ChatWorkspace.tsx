@@ -773,5 +773,13 @@ export function summaryOf(candidate: Candidate): string {
   if (candidate.kind === "promise") {
     return `${p.title ?? "伏笔"}：${String(p.contract ?? p.payoffContract ?? "").slice(0, 60)}`;
   }
+  if (candidate.kind === "knowledge_entry") {
+    return `${p.name ?? "未命名知识"}：${String(p.summary ?? "").slice(0, 60)}`;
+  }
+  if (candidate.kind === "outline_patch") {
+    return `${p.level === "volume" ? "卷" : "章节"} · ${p.title ?? "未命名"}：${String(
+      p.goal ?? "",
+    ).slice(0, 60)}`;
+  }
   return String(p.text ?? p.description ?? p.title ?? "候选内容").slice(0, 90);
 }

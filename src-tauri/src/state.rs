@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use crate::{
     domain::ModelConfig,
     error::{AppError, AppResult},
-    model::ModelStore,
+    model::{ApiKeyCache, ModelStore},
     project::LoadedProject,
 };
 
 pub struct AppState {
     pub project: Mutex<Option<LoadedProject>>,
     pub model_store: ModelStore,
+    pub api_keys: ApiKeyCache,
     pub model: Mutex<ModelConfig>,
     pub cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
@@ -24,9 +25,21 @@ impl AppState {
         Self {
             project: Mutex::new(None),
             model_store,
+            api_keys: ApiKeyCache::default(),
             model: Mutex::new(model),
             cancellations: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn api_key(&self) -> AppResult<Option<String>> {
+        let key = self.api_keys.get()?;
+        let present = key.is_some();
+        if let Ok(mut model) = self.model.lock() {
+            model.has_api_key = present;
+        }
+        // Keep the non-secret presence flag current for the next app launch.
+        let _ = self.model_store.mark_api_key_present(present);
+        Ok(key)
     }
 
     pub fn with_project<T>(&self, f: impl FnOnce(&LoadedProject) -> AppResult<T>) -> AppResult<T> {

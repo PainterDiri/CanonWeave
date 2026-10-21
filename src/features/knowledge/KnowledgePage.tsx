@@ -19,6 +19,7 @@ import {
   SectionTitle,
   Textarea,
 } from "@/components/ui";
+import { AgentSuggestion } from "@/components/AgentSuggestion";
 import {
   ipc,
   type KnowledgeDomain,
@@ -209,6 +210,7 @@ export function KnowledgePage() {
           </div>
         }
       />
+      <AgentSuggestion outputs={["all", "knowledge", "outline"]} />
       <p className="-mt-2 mb-5 max-w-3xl text-[12px] leading-6 text-muted">
         环境、重要物品和自建知识域与人物并列。条目会自动成为图谱实体，并进入全文检索、上下文编译和
         Narrative Wiki；作者确认后的结构化字段才是正式设定。

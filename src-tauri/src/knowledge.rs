@@ -238,7 +238,7 @@ pub fn prompt_context(conn: &Connection, project_id: &str, limit: usize) -> AppR
     Ok(rows.join("\n"))
 }
 
-fn rebuild_fts(
+pub(crate) fn rebuild_fts(
     conn: &Connection,
     project_id: &str,
     entry_id: &str,
@@ -277,6 +277,108 @@ fn rebuild_fts(
         ],
     )?;
     Ok(())
+}
+
+/// 只允许在候选确认事务中调用。这里不会覆盖已有权威条目。
+pub(crate) fn apply_confirmed_candidate(
+    conn: &Connection,
+    project_id: &str,
+    payload: &Value,
+) -> AppResult<String> {
+    let domain = if let Some(domain_id) = payload.get("domainId").and_then(Value::as_str) {
+        conn.query_row(
+            &format!("{DOMAIN_SELECT} WHERE d.project_id=?1 AND d.id=?2"),
+            params![project_id, domain_id],
+            domain_from_row,
+        )
+        .optional()?
+    } else if let Some(domain_key) = payload.get("domainKey").and_then(Value::as_str) {
+        conn.query_row(
+            &format!("{DOMAIN_SELECT} WHERE d.project_id=?1 AND d.key=?2"),
+            params![project_id, domain_key],
+            domain_from_row,
+        )
+        .optional()?
+    } else {
+        None
+    }
+    .ok_or_else(|| AppError::Message("知识候选找不到目标知识域".into()))?;
+
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::Message("知识候选缺少名称".into()))?;
+    let duplicate: bool = conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM knowledge_entry
+           WHERE project_id=?1 AND domain_id=?2 AND name=?3
+         )",
+        params![project_id, domain.id, name],
+        |row| row.get(0),
+    )?;
+    if duplicate {
+        return Err(AppError::Message(format!(
+            "知识域“{}”中已经存在条目“{name}”",
+            domain.name
+        )));
+    }
+
+    let aliases = payload.get("aliases").cloned().unwrap_or_else(|| json!([]));
+    if !aliases.is_array() {
+        return Err(AppError::Message("知识候选 aliases 必须是数组".into()));
+    }
+    let summary = payload
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let fields = payload.get("fields").cloned().unwrap_or_else(|| json!({}));
+    if !fields.is_object() {
+        return Err(AppError::Message("知识候选 fields 必须是对象".into()));
+    }
+    let description = if summary.is_empty() {
+        format!("{}知识条目", domain.name)
+    } else {
+        summary.to_string()
+    };
+    let entity_id = uuid::Uuid::new_v4().to_string();
+    let entry_id = uuid::Uuid::new_v4().to_string();
+    let ts = now();
+    conn.execute(
+        "INSERT INTO entity
+         (id, project_id, type, canonical_name, aliases, status, description, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,'confirmed',?6,?7,?7)",
+        params![
+            entity_id,
+            project_id,
+            format!("knowledge:{}", domain.key),
+            name,
+            aliases.to_string(),
+            description,
+            ts
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO knowledge_entry
+         (id, project_id, domain_id, entity_id, name, aliases, summary, fields, status,
+          created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'confirmed',?9,?9)",
+        params![
+            entry_id,
+            project_id,
+            domain.id,
+            entity_id,
+            name,
+            aliases.to_string(),
+            summary,
+            fields.to_string(),
+            ts
+        ],
+    )?;
+    rebuild_fts(conn, project_id, &entry_id, &domain, name, summary, &fields)?;
+    Ok(entry_id)
 }
 
 pub fn save_entry(

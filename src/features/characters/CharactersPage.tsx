@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { LoaderCircle, Plus, Sparkles, UserRound } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
+import { AgentSuggestion } from "@/components/AgentSuggestion";
 import { ipc, type CharacterDetail } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 import { VoicePanel } from "@/features/characters/VoicePanel";
@@ -119,6 +120,7 @@ export function CharactersPage() {
           </Button>
         }
       />
+      <AgentSuggestion outputs={["all", "characters"]} />
       {error ? (
         <div className="mb-4 rounded-lg border border-coral/25 bg-coral-soft/60 px-4 py-2.5 text-[12px] text-coral">
           {error}

@@ -183,9 +183,96 @@ export const commands = {
 	motifList: () => typedError<MotifRecord[], string>(__TAURI_INVOKE("motif_list")),
 	motifDensityCheck: (sceneId: string, text: string) => typedError<MotifCheck, string>(__TAURI_INVOKE("motif_density_check", { sceneId, text })),
 	exportProject: (input: ExportInput) => typedError<ExportResult, string>(__TAURI_INVOKE("export_project", { input })),
+	agentTools: () => __TAURI_INVOKE<AgentToolDefinition[]>("agent_tools"),
+	agentRuns: (limit: number | null) => typedError<AgentRun[], string>(__TAURI_INVOKE("agent_runs", { limit })),
+	agentRunCreate: (input: AgentRunCreateInput) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_create", { input })),
+	agentRunGet: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_get", { id })),
+	agentRunExecute: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_execute", { id })),
+	agentRunPause: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_pause", { id })),
+	agentRunCancel: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_cancel", { id })),
+	agentRunResume: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_resume", { id })),
+	agentRunRetryStep: (runId: string, stepId: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_retry_step", { runId, stepId })),
+	agentFoundation: () => typedError<FoundationReport, string>(__TAURI_INVOKE("agent_foundation")),
 };
 
 /* Types */
+export type AgentEvidence = {
+	id: string,
+	runId: string,
+	stepId: string,
+	sourceKind: string,
+	sourceId: string,
+	sourceSpan: string,
+	quote: string,
+	createdAt: string,
+};
+
+export type AgentRun = {
+	id: string,
+	sessionId: string | null,
+	mode: string,
+	scope: string,
+	output: string,
+	goal: string,
+	status: string,
+	plan: any,
+	currentStep: number,
+	approvalPolicy: string,
+	model: string,
+	contextHash: string,
+	error: string,
+	startedAt: string | null,
+	finishedAt: string | null,
+	createdAt: string,
+	updatedAt: string,
+	pendingCandidates: number,
+	totalCandidates: number,
+};
+
+export type AgentRunCreateInput = {
+	goal: string,
+	mode: string,
+	scope: string,
+	output: string,
+	sessionId: string | null,
+};
+
+export type AgentRunDetail = {
+	run: AgentRun,
+	steps: AgentStep[],
+	candidates: Candidate[],
+	evidence: AgentEvidence[],
+};
+
+export type AgentStep = {
+	id: string,
+	runId: string,
+	seq: number,
+	kind: string,
+	toolName: string,
+	input: any,
+	output: any,
+	status: string,
+	riskLevel: string,
+	requiresApproval: boolean,
+	candidateIds: string[],
+	evidence: any,
+	error: string,
+	startedAt: string | null,
+	finishedAt: string | null,
+};
+
+export type AgentToolDefinition = {
+	name: string,
+	description: string,
+	parameterSchema: any,
+	access: string,
+	riskLevel: string,
+	requiresApproval: boolean,
+	retryable: boolean,
+	outputTarget: string,
+};
+
 export type AppInfo = {
 	name: string,
 	version: string,
@@ -266,6 +353,8 @@ export type Candidate = {
 	riskLevel: string,
 	status: string,
 	batchId: string | null,
+	agentRunId: string | null,
+	agentStepId: string | null,
 	createdAt: string,
 	confirmedAt: string | null,
 };
@@ -484,6 +573,23 @@ export type ExportResult = {
 
 export type ExtractionResult = {
 	candidatesCreated: number,
+};
+
+export type FoundationCheck = {
+	code: string,
+	label: string,
+	severity: string,
+	message: string,
+	evidence: string[],
+};
+
+export type FoundationReport = {
+	ready: boolean,
+	passedCount: number,
+	totalCount: number,
+	errorCount: number,
+	warningCount: number,
+	checks: FoundationCheck[],
 };
 
 export type GenerationInput = {

@@ -69,11 +69,30 @@ src-tauri/.tauri/
 .env.*
 !.env.example
 !.env.*.example
+.envrc
+.direnv/
 *.pem
 *.key
 *.p12
 *.pfx
+*.cer
+*.crt
+*.csr
+*.p8
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+*.keychain-db-shm
+*.keychain-db-wal
+*.keychain-db-journal
 secrets/
+signing/
+certificates/
+/model.json
+/src-tauri/model.json
 
 # Local databases and runtime data
 *.db

@@ -117,6 +117,164 @@ async function installMock(page: import("@playwright/test").Page) {
   await page.addInitScript(
     ({ project, premise, candidate, candidate2, chapters }) => {
       let callbackId = 1;
+      let agentStatus = "running";
+      let agentCandidates = [
+        {
+          id: "ac1",
+          kind: "entity",
+          payload: {
+            type: "character",
+            canonicalName: "守夜人",
+            aliases: [],
+            description: "掌握旧车站规则的对手。",
+          },
+          sourceSpan: "import:ch01｜守夜人看见钥匙时退了一步。",
+          sourceMessageId: null,
+          confidence: 0.86,
+          riskLevel: "L1",
+          status: "pending",
+          batchId: "run1",
+          agentRunId: "run1",
+          agentStepId: "step3",
+          createdAt: "2026-10-20T08:10:00Z",
+          confirmedAt: null,
+        },
+        {
+          id: "ac2",
+          kind: "knowledge_entry",
+          payload: {
+            domainId: "domain-env",
+            name: "雨夜旧车站",
+            summary: "只在特定雨夜出现，钟比现实慢七分钟。",
+            fields: { rules: "错过末班车会被困到下一次雨夜。" },
+          },
+          sourceSpan: "chapter:o1｜旧车站的钟比现实慢七分钟。",
+          sourceMessageId: null,
+          confidence: 0.78,
+          riskLevel: "L2",
+          status: "pending",
+          batchId: "run1",
+          agentRunId: "run1",
+          agentStepId: "step3",
+          createdAt: "2026-10-20T08:11:00Z",
+          confirmedAt: null,
+        },
+      ];
+      const agentSteps = [
+        {
+          id: "step1",
+          runId: "run1",
+          seq: 1,
+          kind: "tool",
+          toolName: "project_inventory",
+          input: {},
+          output: {
+            counts: { entities: 4, knowledgeEntries: 4 },
+            evidenceSources: [{ quote: "守夜人看见钥匙时退了一步。" }],
+          },
+          status: "completed",
+          riskLevel: "L0",
+          requiresApproval: false,
+          candidateIds: [],
+          evidence: [],
+          error: "",
+          startedAt: "2026-10-20T08:10:00Z",
+          finishedAt: "2026-10-20T08:10:01Z",
+        },
+        {
+          id: "step2",
+          runId: "run1",
+          seq: 2,
+          kind: "tool",
+          toolName: "search_fts",
+          input: { query: "整理项目资料" },
+          output: { query: "整理项目资料", hits: [{}, {}], evidenceSources: [] },
+          status: "completed",
+          riskLevel: "L0",
+          requiresApproval: false,
+          candidateIds: [],
+          evidence: [],
+          error: "",
+          startedAt: "2026-10-20T08:10:01Z",
+          finishedAt: "2026-10-20T08:10:02Z",
+        },
+        {
+          id: "step3",
+          runId: "run1",
+          seq: 3,
+          kind: "synthesis",
+          toolName: "model_synthesis",
+          input: {},
+          output: {
+            summary: "识别人物与知识条目候选。",
+            created: [{ candidateId: "ac1" }, { candidateId: "ac2" }],
+            skipped: [],
+          },
+          status: "completed",
+          riskLevel: "L2",
+          requiresApproval: true,
+          candidateIds: ["ac1", "ac2"],
+          evidence: [],
+          error: "",
+          startedAt: "2026-10-20T08:10:02Z",
+          finishedAt: "2026-10-20T08:10:08Z",
+        },
+        {
+          id: "step4",
+          runId: "run1",
+          seq: 4,
+          kind: "check",
+          toolName: "foundation_check",
+          input: {},
+          output: { ready: false, passedCount: 5, totalCount: 7, errorCount: 2 },
+          status: "completed",
+          riskLevel: "L0",
+          requiresApproval: false,
+          candidateIds: [],
+          evidence: [],
+          error: "",
+          startedAt: "2026-10-20T08:10:08Z",
+          finishedAt: "2026-10-20T08:10:09Z",
+        },
+      ];
+      const agentRun = (status = agentStatus, goal = "分析当前项目并整理人物与知识候选") => ({
+        id: "run1",
+        sessionId: null,
+        mode: "propose",
+        scope: "project",
+        output: "all",
+        goal,
+        status,
+        plan: [],
+        currentStep: 4,
+        approvalPolicy: "manual",
+        model: "gpt-4o-mini",
+        contextHash: "ctx1",
+        error: "",
+        startedAt: "2026-10-20T08:10:00Z",
+        finishedAt: null,
+        createdAt: "2026-10-20T08:09:00Z",
+        updatedAt: "2026-10-20T08:10:09Z",
+        pendingCandidates: agentCandidates.filter((item) => item.status === "pending").length,
+        totalCandidates: agentCandidates.length,
+      });
+      const agentDetail = (status = agentStatus, goal?: string) => ({
+        run: agentRun(status, goal),
+        steps: agentSteps,
+        candidates: agentCandidates,
+        evidence: [
+          {
+            id: "ae1",
+            runId: "run1",
+            stepId: "step3",
+            sourceKind: "import",
+            sourceId: "ch01",
+            sourceSpan: "import:ch01",
+            quote: "守夜人看见钥匙时退了一步。",
+            createdAt: "2026-10-20T08:10:05Z",
+          },
+        ],
+      });
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => callbackId++,
         invoke: async (cmd: string, args?: any) => {
@@ -313,6 +471,95 @@ async function installMock(page: import("@playwright/test").Page) {
               ];
             case "chat_candidates":
               return [candidate, candidate2];
+            case "agent_tools":
+              return [
+                {
+                  name: "project_inventory",
+                  description: "读取项目清单",
+                  parameterSchema: {},
+                  access: "read",
+                  riskLevel: "L0",
+                  requiresApproval: false,
+                  retryable: true,
+                  outputTarget: "context",
+                },
+                {
+                  name: "propose_entity",
+                  description: "提出实体候选",
+                  parameterSchema: {},
+                  access: "write",
+                  riskLevel: "L1",
+                  requiresApproval: true,
+                  retryable: true,
+                  outputTarget: "candidate",
+                },
+              ];
+            case "agent_runs":
+              return [agentRun()];
+            case "agent_run_get":
+              return agentDetail();
+            case "agent_run_create":
+              agentStatus = "running";
+              return agentDetail("draft", args?.input?.goal);
+            case "agent_run_execute":
+              agentStatus = "waiting_approval";
+              return agentDetail();
+            case "agent_run_pause":
+              agentStatus = "paused";
+              return agentDetail();
+            case "agent_run_resume":
+              agentStatus = "running";
+              return agentDetail();
+            case "agent_run_cancel":
+              agentStatus = "canceled";
+              return agentDetail();
+            case "agent_run_retry_step":
+              agentStatus = "running";
+              return agentDetail();
+            case "agent_foundation":
+              return {
+                ready: false,
+                passedCount: 5,
+                totalCount: 7,
+                errorCount: 2,
+                warningCount: 0,
+                checks: [
+                  {
+                    code: "foundation.core_cast",
+                    label: "核心人物与对手",
+                    severity: "pass",
+                    message: "已具备两个核心角色。",
+                    evidence: [],
+                  },
+                  {
+                    code: "foundation.relationship_tension",
+                    label: "关系张力",
+                    severity: "error",
+                    message: "核心人物之间还没有写明目标冲突。",
+                    evidence: [],
+                  },
+                  {
+                    code: "foundation.timeline_anchors",
+                    label: "时间线锚点",
+                    severity: "error",
+                    message: "时间锚点不足三个。",
+                    evidence: [],
+                  },
+                ],
+              };
+            case "candidate_accept":
+              agentCandidates = agentCandidates.map((item) =>
+                item.id === args?.id ? { ...item, status: "accepted" } : item,
+              );
+              return {
+                candidate: agentCandidates.find((item) => item.id === args?.id),
+                createdId: "new-entity",
+              };
+            case "candidate_reject":
+              agentCandidates = agentCandidates.map((item) =>
+                item.id === args?.id ? { ...item, status: "rejected" } : item,
+              );
+              return agentCandidates.find((item) => item.id === args?.id);
             case "candidate_list":
               return args?.kind === "draft" || args?.kind === "wiki_edit"
                 ? []
@@ -786,8 +1033,8 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("雨夜的第七封信").first()).toBeVisible();
   const primaryNav = page.locator("aside nav button");
-  await expect(primaryNav.nth(1)).toContainText("正文");
-  await expect(primaryNav.nth(2)).toContainText("协作助手");
+  await expect(primaryNav.nth(1)).toContainText("Agent");
+  await expect(primaryNav.nth(2)).toContainText("正文");
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join("test-results", "overview.png") });
 
@@ -796,7 +1043,30 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "seed.png") });
 
-  await page.getByRole("button", { name: /协作助手/ }).click();
+  await page.getByRole("button", { name: /^Agent/ }).click();
+  await expect(page.getByText("Agent 项目工作台")).toBeVisible();
+  await expect(page.getByText("计划与执行轨迹")).toBeVisible();
+  await expect(page.getByText("守夜人", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "暂停" }).click();
+  await expect(page.getByText("已暂停").first()).toBeVisible();
+  await page.getByRole("button", { name: "恢复" }).click();
+  await expect(page.getByText("待审批").first()).toBeVisible();
+  await page.screenshot({ path: path.join("test-results", "agent.png") });
+
+  await page.getByRole("button", { name: "新建任务" }).click();
+  await page
+    .getByPlaceholder("例如：分析现有正文，整理人物、关系和伏笔候选，并说明对当前骨架的影响。")
+    .fill("从现有旧稿整理人物、关系和伏笔候选");
+  await page.getByRole("button", { name: "启动任务" }).click();
+  await expect(page.getByText("待审批", { exact: true }).first()).toBeVisible();
+  await page.getByTitle("查看候选差异").first().click();
+  await expect(page.getByText("结构化变更")).toBeVisible();
+  await expect(page.getByText("来源证据")).toBeVisible();
+  await page.getByRole("button", { name: "关闭" }).click();
+  await page.getByTitle("确认候选").first().click();
+  await expect(page.getByText("候选已确认并写入权威资料")).toBeVisible();
+
+  await page.getByRole("button", { name: "自由讨论" }).click();
   await expect(page.getByText("建议把第一场放在守夜之后")).toBeVisible();
   await page.screenshot({ path: path.join("test-results", "chat.png") });
 
@@ -868,4 +1138,29 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "关系图", exact: true }).click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: path.join("test-results", "graph.png") });
+});
+
+test("agent workbench fits both desktop review sizes", async ({ page }) => {
+  await installMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^Agent/ }).click();
+  await expect(page.getByText("Agent 项目工作台")).toBeVisible();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: path.join("test-results", "agent-1440.png") });
+
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.waitForTimeout(200);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: path.join("test-results", "agent-1280.png") });
 });

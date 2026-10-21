@@ -1,4 +1,5 @@
 mod commands;
+mod agent;
 mod candidates;
 mod chat;
 mod context;
@@ -31,6 +32,7 @@ mod voice;
 mod preferences;
 mod motifs;
 mod export;
+mod foundation;
 
 use tauri_specta::{collect_commands, Builder};
 use tauri::Manager;
@@ -84,7 +86,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
         community_list, impact_analysis, insight_query, wiki_list, wiki_rebuild,
         wiki_propose_edit, voice_sample_list, voice_sample_add, voice_profile_get,
         voice_thresholds_save, voice_check, preference_summary, motif_list,
-        motif_density_check, export_project
+        motif_density_check, export_project, agent_tools, agent_runs, agent_run_create,
+        agent_run_get, agent_run_execute, agent_run_pause, agent_run_cancel,
+        agent_run_resume, agent_run_retry_step, agent_foundation
     ])
 }
 

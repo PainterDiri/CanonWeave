@@ -19,13 +19,16 @@ fn candidate_from_row(row: &Row<'_>) -> rusqlite::Result<Candidate> {
         risk_level: row.get(6)?,
         status: row.get(7)?,
         batch_id: row.get(8)?,
-        created_at: row.get(9)?,
-        confirmed_at: row.get(10)?,
+        agent_run_id: row.get(9)?,
+        agent_step_id: row.get(10)?,
+        created_at: row.get(11)?,
+        confirmed_at: row.get(12)?,
     })
 }
 
 const SELECT: &str = "SELECT id, kind, payload, source_span, source_message_id, confidence,
-    risk_level, status, batch_id, created_at, confirmed_at FROM candidate";
+    risk_level, status, batch_id, agent_run_id, agent_step_id, created_at, confirmed_at
+    FROM candidate";
 
 pub fn risk_for(kind: &str, payload: &Value, has_source: bool) -> &'static str {
     if !has_source {
@@ -39,8 +42,21 @@ pub fn risk_for(kind: &str, payload: &Value, has_source: bool) -> &'static str {
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 let high_impact = [
-                    "死", "亡", "持有", "位置", "地点", "时间", "关系", "血缘", "身份", "知道",
-                    "知情", "destroyed", "dead", "holds", "located",
+                    "死",
+                    "亡",
+                    "持有",
+                    "位置",
+                    "地点",
+                    "时间",
+                    "关系",
+                    "血缘",
+                    "身份",
+                    "知道",
+                    "知情",
+                    "destroyed",
+                    "dead",
+                    "holds",
+                    "located",
                 ]
                 .iter()
                 .any(|needle| predicate.contains(needle));
@@ -54,6 +70,7 @@ pub fn risk_for(kind: &str, payload: &Value, has_source: bool) -> &'static str {
             }
         }
         "entity" | "rule" | "style_sample" | "scene_goal" => "L1",
+        "knowledge_entry" | "outline_patch" => "L2",
         _ => "L2",
     }
 }
@@ -138,6 +155,22 @@ pub fn get(conn: &Connection, project_id: &str, id: &str) -> AppResult<Candidate
     .ok_or_else(|| AppError::Message("找不到候选条目".into()))
 }
 
+pub fn list_for_run(
+    conn: &Connection,
+    project_id: &str,
+    run_id: &str,
+) -> AppResult<Vec<Candidate>> {
+    let mut stmt = conn.prepare(&format!(
+        "{SELECT} WHERE project_id=?1 AND agent_run_id=?2
+         ORDER BY CASE risk_level WHEN 'L3' THEN 0 WHEN 'L2' THEN 1 WHEN 'L1' THEN 2 ELSE 3 END,
+         created_at"
+    ))?;
+    let rows = stmt
+        .query_map(params![project_id, run_id], candidate_from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 pub fn list(
     conn: &Connection,
     project_id: &str,
@@ -195,7 +228,11 @@ pub fn list(
             .unwrap_or(0.0);
         rank(&left.risk_level)
             .cmp(&rank(&right.risk_level))
-            .then_with(|| right_score.partial_cmp(&left_score).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                right_score
+                    .partial_cmp(&left_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| right.created_at.cmp(&left.created_at))
     });
     Ok(rows)
@@ -235,11 +272,16 @@ pub fn queue(conn: &Connection, project_id: &str) -> AppResult<ReviewQueue> {
 }
 
 pub fn reject(conn: &Connection, project_id: &str, id: &str) -> AppResult<Candidate> {
+    let candidate = get(conn, project_id, id)?;
     conn.execute(
         "UPDATE candidate SET status='rejected' WHERE project_id=?1 AND id=?2 AND status='pending'",
         params![project_id, id],
     )?;
-    get(conn, project_id, id)
+    let updated = get(conn, project_id, id)?;
+    if let Some(run_id) = candidate.agent_run_id.as_deref() {
+        crate::agent::refresh_review_status(conn, project_id, run_id)?;
+    }
+    Ok(updated)
 }
 
 pub fn update_payload(
@@ -291,7 +333,11 @@ fn find_entity(conn: &Connection, project_id: &str, name: &str) -> AppResult<Opt
 }
 
 /// 作者确认候选后，才写入正式表。所有分支在同一事务中完成。
-pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<CandidateAcceptResult> {
+pub fn accept(
+    conn: &mut Connection,
+    project_id: &str,
+    id: &str,
+) -> AppResult<CandidateAcceptResult> {
     let candidate = get(conn, project_id, id)?;
     if candidate.status != "pending" {
         return Err(AppError::Message("该候选已经处理".into()));
@@ -319,10 +365,7 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             if name.trim().is_empty() {
                 return Err(AppError::Message("实体缺少名称".into()));
             }
-            let aliases = payload
-                .get("aliases")
-                .cloned()
-                .unwrap_or_else(|| json!([]));
+            let aliases = payload.get("aliases").cloned().unwrap_or_else(|| json!([]));
             let description = payload
                 .get("description")
                 .and_then(Value::as_str)
@@ -377,7 +420,10 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             let perspective = payload.get("perspective").and_then(Value::as_str);
             let subject_id = find_entity(&tx, project_id, subject)?;
             let object_id = find_entity(&tx, project_id, object)?;
-            let quote = payload.get("quote").and_then(Value::as_str).unwrap_or_default();
+            let quote = payload
+                .get("quote")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let span = match (&candidate.source_span, quote.is_empty()) {
                 (Some(span), false) => format!("{span}｜{quote}"),
                 (Some(span), true) => span.clone(),
@@ -426,12 +472,25 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
                     id,
                     project_id,
                     title,
-                    payload.get("participants").cloned().unwrap_or(json!([])).to_string(),
+                    payload
+                        .get("participants")
+                        .cloned()
+                        .unwrap_or(json!([]))
+                        .to_string(),
                     payload.get("placeId").and_then(Value::as_str),
-                    payload.get("storyTime").and_then(Value::as_str).unwrap_or_default(),
+                    payload
+                        .get("storyTime")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
                     payload.get("revealTime").and_then(Value::as_str),
-                    payload.get("cause").and_then(Value::as_str).unwrap_or_default(),
-                    payload.get("outcome").and_then(Value::as_str).unwrap_or_default(),
+                    payload
+                        .get("cause")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    payload
+                        .get("outcome")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
                     candidate.source_span.clone().unwrap_or_default(),
                     ts,
                     branch_id
@@ -441,13 +500,22 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
         }
         "relation" => {
             let id = uuid::Uuid::new_v4().to_string();
-            let from_name = payload.get("from").and_then(Value::as_str).unwrap_or_default();
-            let to_name = payload.get("to").and_then(Value::as_str).unwrap_or_default();
+            let from_name = payload
+                .get("from")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let to_name = payload
+                .get("to")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let from_id = find_entity(&tx, project_id, from_name)?
                 .ok_or_else(|| AppError::Message(format!("关系候选找不到实体：{from_name}")))?;
             let to_id = find_entity(&tx, project_id, to_name)?
                 .ok_or_else(|| AppError::Message(format!("关系候选找不到实体：{to_name}")))?;
-            let relation_type = payload.get("type").and_then(Value::as_str).unwrap_or_default();
+            let relation_type = payload
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             if relation_type.trim().is_empty() {
                 return Err(AppError::Message("关系候选缺少类型".into()));
             }
@@ -536,6 +604,97 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             )?;
             id
         }
+        "knowledge_entry" => {
+            crate::knowledge::apply_confirmed_candidate(&tx, project_id, &payload)?
+        }
+        "outline_patch" => {
+            let id = uuid::Uuid::new_v4().to_string();
+            let level = payload
+                .get("level")
+                .and_then(Value::as_str)
+                .unwrap_or("chapter");
+            if !["volume", "chapter"].contains(&level) {
+                return Err(AppError::Message(
+                    "Agent 大纲补丁只能建立卷或章节节点".into(),
+                ));
+            }
+            let title = payload
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| AppError::Message("大纲补丁缺少标题".into()))?;
+            let parent_id = payload.get("parentId").and_then(Value::as_str);
+            if let Some(parent_id) = parent_id {
+                let exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM outline_node WHERE project_id=?1 AND id=?2)",
+                    params![project_id, parent_id],
+                    |row| row.get(0),
+                )?;
+                if !exists {
+                    return Err(AppError::Message("大纲补丁的父节点不存在".into()));
+                }
+            }
+            let order_no = payload
+                .get("orderNo")
+                .and_then(Value::as_i64)
+                .map(|value| value as i32)
+                .unwrap_or_else(|| {
+                    tx.query_row(
+                        "SELECT COALESCE(MAX(order_no), 0) + 1 FROM outline_node
+                         WHERE project_id=?1 AND level=?2 AND parent_id IS ?3",
+                        params![project_id, level, parent_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(1)
+                });
+            let duplicate: bool = tx.query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM outline_node
+                   WHERE project_id=?1 AND level=?2 AND order_no=?3 AND parent_id IS ?4
+                 )",
+                params![project_id, level, order_no, parent_id],
+                |row| row.get(0),
+            )?;
+            if duplicate {
+                return Err(AppError::Message(
+                    "目标位置已经有大纲节点，请先处理现有结构".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO outline_node
+                 (id, project_id, parent_id, level, order_no, title, goal, conflict, turn,
+                  payoff, status, branch_id, source, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'confirmed',?11,'agent',?12,?12)",
+                params![
+                    id,
+                    project_id,
+                    parent_id,
+                    level,
+                    order_no,
+                    title,
+                    payload
+                        .get("goal")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    payload
+                        .get("conflict")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    payload
+                        .get("turn")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    payload
+                        .get("payoff")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    branch_id,
+                    ts
+                ],
+            )?;
+            id
+        }
         "scene_goal" => {
             let id = uuid::Uuid::new_v4().to_string();
             let text = text_of(&payload);
@@ -580,7 +739,8 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
             uuid::Uuid::new_v4().to_string(),
             project_id,
             id,
-            json!({"kind": candidate.kind, "risk": candidate.risk_level, "createdId": created_id}).to_string(),
+            json!({"kind": candidate.kind, "risk": candidate.risk_level, "createdId": created_id})
+                .to_string(),
             ts
         ],
     )?;
@@ -589,6 +749,9 @@ pub fn accept(conn: &mut Connection, project_id: &str, id: &str) -> AppResult<Ca
     }
     tx.commit()?;
     let updated = get(conn, project_id, id)?;
+    if let Some(run_id) = candidate.agent_run_id.as_deref() {
+        crate::agent::refresh_review_status(conn, project_id, run_id)?;
+    }
     Ok(CandidateAcceptResult {
         candidate: updated,
         created_id,
@@ -613,6 +776,8 @@ fn table_for_kind(kind: &str) -> Option<&'static str> {
         "rule" => Some("rule"),
         "style_sample" => Some("style_sample"),
         "scene_goal" => Some("outline_node"),
+        "knowledge_entry" => Some("knowledge_entry"),
+        "outline_patch" => Some("outline_node"),
         _ => None,
     }
 }
@@ -648,8 +813,7 @@ pub fn batch_accept_selective(
     let eligible: Vec<Candidate> = pending
         .into_iter()
         .filter(|candidate| {
-            allowed_levels.contains(&candidate.risk_level.as_str())
-                && ids.contains(&candidate.id)
+            allowed_levels.contains(&candidate.risk_level.as_str()) && ids.contains(&candidate.id)
         })
         .collect();
     if eligible.is_empty() {
@@ -746,16 +910,15 @@ pub fn batch_accept_selective(
             ts
         ],
     )?;
-    let parent: Option<String> = chapter_id
-        .and_then(|id| {
-            conn.query_row(
-                "SELECT current_revision_id FROM chapter WHERE project_id=?1 AND id=?2",
-                params![project_id, id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .ok()
-            .flatten()
-        });
+    let parent: Option<String> = chapter_id.and_then(|id| {
+        conn.query_row(
+            "SELECT current_revision_id FROM chapter WHERE project_id=?1 AND id=?2",
+            params![project_id, id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+    });
     conn.execute(
         "INSERT INTO revision (id, project_id, parent_id, chapter_id, diff, snapshot_id,
             author_action, created_at) VALUES (?1,?2,?3,?4,?5,?6,'batch_accept',?7)",
@@ -841,8 +1004,7 @@ pub fn undo_batch(
     if undone_at.is_some() {
         return Err(AppError::Message("该批次已经撤销".into()));
     }
-    let snapshot_id =
-        snapshot_id.ok_or_else(|| AppError::Message("批次缺少可撤销快照".into()))?;
+    let snapshot_id = snapshot_id.ok_or_else(|| AppError::Message("批次缺少可撤销快照".into()))?;
     let content: String = conn.query_row(
         "SELECT content FROM snapshot WHERE project_id=?1 AND id=?2",
         params![project_id, snapshot_id],
@@ -987,7 +1149,11 @@ mod tests {
         accept(&mut loaded.conn, &pid, &entity.id).unwrap();
         let count: i64 = loaded
             .conn
-            .query_row("SELECT COUNT(*) FROM entity WHERE canonical_name='林澈'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM entity WHERE canonical_name='林澈'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
         let claim = insert(
@@ -1028,9 +1194,7 @@ mod tests {
                 chosen_run_id: "a".into(),
                 reason: "短句".into(),
                 left_text: Some("灯灭了。他停住。门开了。".into()),
-                right_text: Some(
-                    "灯光在漫长的沉默中缓慢熄灭，他不得不停下来等待门外的人。".into(),
-                ),
+                right_text: Some("灯光在漫长的沉默中缓慢熄灭，他不得不停下来等待门外的人。".into()),
             },
         )
         .unwrap();
@@ -1114,7 +1278,11 @@ mod tests {
         assert_eq!(revisions, 1);
         let risky_status: String = loaded
             .conn
-            .query_row("SELECT status FROM candidate WHERE id=?1", [&risky.id], |row| row.get(0))
+            .query_row(
+                "SELECT status FROM candidate WHERE id=?1",
+                [&risky.id],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(risky_status, "pending");
         let batch_revision: String = loaded
@@ -1185,8 +1353,7 @@ mod tests {
             .unwrap();
             ids.push(candidate.id);
         }
-        let (_, revision, accepted) =
-            batch_accept_l1(&mut loaded.conn, &pid, &ids, None).unwrap();
+        let (_, revision, accepted) = batch_accept_l1(&mut loaded.conn, &pid, &ids, None).unwrap();
         assert_eq!(accepted, 100);
         let revisions: i64 = loaded
             .conn

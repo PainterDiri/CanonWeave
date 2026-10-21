@@ -27,14 +27,14 @@ type NavItem = {
 const navGroups: { label: string | null; items: NavItem[] }[] = [
   {
     label: null,
-    items: [{ key: "overview", label: "概览", icon: Compass, mode: "studio" }],
+    items: [
+      { key: "overview", label: "概览", icon: Compass, mode: "studio" },
+      { key: "agent", label: "Agent", icon: Bot, mode: "studio" },
+    ],
   },
   {
     label: "写作",
-    items: [
-      { key: "studio", label: "正文", icon: BookOpen, mode: "studio" },
-      { key: "agent", label: "协作助手", icon: Bot, mode: "studio" },
-    ],
+    items: [{ key: "studio", label: "正文", icon: BookOpen, mode: "studio" }],
   },
   {
     label: "故事资料",

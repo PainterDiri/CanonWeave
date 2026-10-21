@@ -2,17 +2,17 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::{
+    blueprint,
     domain::{
         NarrativeBlueprintView, NarrativeLogicNode, OutlineGenerateInput, OutlineNode,
         OutlineStatus, OutlineUpdateInput, VolumePlanInput,
     },
     error::IpcResult,
-    knowledge,
-    blueprint,
+    foundation, knowledge,
     llm::{
-        outline_adaptive_system_prompt, outline_adaptive_user_prompt, outline_chapter_system_prompt,
-        outline_chapter_user_prompt, outline_volume_system_prompt, outline_volume_user_prompt,
-        parse_json_loose, ChatTurn, LlmClient,
+        outline_adaptive_system_prompt, outline_adaptive_user_prompt,
+        outline_chapter_system_prompt, outline_chapter_user_prompt, outline_volume_system_prompt,
+        outline_volume_user_prompt, parse_json_loose, ChatTurn, LlmClient,
     },
     outline::{self, OutlineChapterDraft, OutlinePlanDraft, OutlineVolumeDraft},
     seed,
@@ -483,6 +483,22 @@ pub async fn outline_generate(
         let premise = seed::active(&loaded.conn, &loaded.summary.id)
             .map_err(|e| e.to_string())?
             .ok_or("请先确认种子卡，再规划卷章")?;
+        let foundation =
+            foundation::evaluate(&loaded.conn, &loaded.summary.id).map_err(|e| e.to_string())?;
+        if !foundation.ready {
+            let blockers = foundation
+                .checks
+                .iter()
+                .filter(|check| check.severity == "error")
+                .take(4)
+                .map(|check| format!("{}：{}", check.label, check.message))
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(format!(
+                "叙事地基尚未达到卷章规划门槛，请先补齐 {} 项阻断问题：{}",
+                foundation.error_count, blockers
+            ));
+        }
         let mut premise = serde_json::to_value(premise).map_err(|e| e.to_string())?;
         let knowledge_context = knowledge::prompt_context(&loaded.conn, &loaded.summary.id, 80)
             .map_err(|e| e.to_string())?;
@@ -508,17 +524,14 @@ pub async fn outline_generate(
             .complete(
                 &[
                     ChatTurn::system(outline_adaptive_system_prompt()),
-                    ChatTurn::user(outline_adaptive_user_prompt(
-                        &premise,
-                        &blueprint_context,
-                    )),
+                    ChatTurn::user(outline_adaptive_user_prompt(&premise, &blueprint_context)),
                 ],
                 Some(client.max_tokens.max(5000)),
             )
             .await
             .map_err(|error| error.to_string())?;
-        let value: Value = parse_json_loose(&raw)
-            .map_err(|error| format!("自适应结构解析失败：{error}"))?;
+        let value: Value =
+            parse_json_loose(&raw).map_err(|error| format!("自适应结构解析失败：{error}"))?;
         let total = value
             .get("totalChapters")
             .and_then(Value::as_i64)
@@ -687,8 +700,14 @@ mod tests {
     fn resolves_logic_nodes_by_number_title_and_id() {
         let nodes = vec![logic_node(1, "车票出现"), logic_node(2, "站长拦截")];
         assert_eq!(resolve_logic_marker("1", &nodes).unwrap().title, "车票出现");
-        assert_eq!(resolve_logic_marker("#2", &nodes).unwrap().title, "站长拦截");
-        assert_eq!(resolve_logic_marker("站长拦截", &nodes).unwrap().order_no, 2);
+        assert_eq!(
+            resolve_logic_marker("#2", &nodes).unwrap().title,
+            "站长拦截"
+        );
+        assert_eq!(
+            resolve_logic_marker("站长拦截", &nodes).unwrap().order_no,
+            2
+        );
         assert_eq!(resolve_logic_marker("node-1", &nodes).unwrap().order_no, 1);
         assert!(resolve_logic_marker("不存在", &nodes).is_none());
     }

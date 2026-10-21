@@ -12,13 +12,14 @@ use crate::{
         parse_json_loose, seed_compact_system_prompt, seed_system_prompt, seed_user_prompt,
         ChatTurn, LlmClient,
     },
-    model, seed,
+    seed,
     state::AppState,
 };
 
 fn client(state: &AppState) -> Result<LlmClient, String> {
     let config = state.model_store.load();
-    let key = model::load_api_key()
+    let key = state
+        .api_key()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "尚未保存 API Key，请先在设置中填写并测试连接".to_string())?;
     LlmClient::new(&config, key).map_err(|e| e.to_string())
@@ -205,7 +206,8 @@ pub fn premise_debug_sources(state: State<'_, AppState>, id: String) -> IpcResul
 
 pub fn require_client(state: &AppState) -> Result<LlmClient, AppError> {
     let config = state.model_store.load();
-    let key = model::load_api_key()?
+    let key = state
+        .api_key()?
         .ok_or_else(|| AppError::Message("尚未保存 API Key，请先在设置中填写并测试连接".into()))?;
     LlmClient::new(&config, key)
 }

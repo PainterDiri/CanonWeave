@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod blueprint;
 pub mod candidates;
 pub mod chat;
@@ -22,6 +23,7 @@ pub mod preferences;
 pub mod motifs;
 pub mod export;
 
+pub use agent::*;
 pub use blueprint::*;
 pub use candidates::*;
 pub use chat::*;

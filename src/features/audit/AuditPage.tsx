@@ -29,6 +29,8 @@ const kindOptions = [
   { key: "rule", label: "规则" },
   { key: "style_sample", label: "文笔样本" },
   { key: "scene_goal", label: "章节目标" },
+  { key: "knowledge_entry", label: "知识条目" },
+  { key: "outline_patch", label: "骨架补丁" },
 ];
 
 export function AuditPage() {
@@ -677,6 +679,8 @@ function labelOf(kind: string) {
       rule: "规则",
       style_sample: "文笔样本",
       scene_goal: "章节目标",
+      knowledge_entry: "知识条目",
+      outline_patch: "骨架补丁",
     }[kind] ?? kind
   );
 }
