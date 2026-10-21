@@ -64,7 +64,7 @@ impl LlmClient {
     pub fn new(config: &ModelConfig, api_key: String) -> AppResult<Self> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
-            .timeout(Duration::from_secs(180))
+            .timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| AppError::Message(format!("初始化模型客户端失败：{e}")))?;
         Ok(Self {
@@ -117,17 +117,40 @@ impl LlmClient {
             .await
             .map_err(|e| AppError::Message(format!("读取模型响应失败：{e}")))?;
         if !status.is_success() {
-            return Err(AppError::Message(format!(
-                "模型服务返回 {status}：{}",
-                body.chars().take(400).collect::<String>()
-            )));
+            return Err(AppError::Message(format_http_error(status.as_u16(), &body)));
         }
         parse_completion_body(&body)
+    }
+
+    /// 长结构化请求优先使用流式响应。部分 OpenAI 兼容网关会给非流式长请求设置
+    /// 较短的代理超时，即使客户端自身允许等待更久也会返回 502/504。
+    pub async fn complete_streaming(
+        &self,
+        messages: &[ChatTurn],
+        max_tokens: i32,
+    ) -> AppResult<String> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.stream_with_limit(messages, max_tokens, cancel, |_| {})
+            .await
     }
 
     pub async fn stream<F>(
         &self,
         messages: &[ChatTurn],
+        cancel: Arc<AtomicBool>,
+        on_delta: F,
+    ) -> AppResult<String>
+    where
+        F: FnMut(&str) + Send,
+    {
+        self.stream_with_limit(messages, self.max_tokens, cancel, on_delta)
+            .await
+    }
+
+    async fn stream_with_limit<F>(
+        &self,
+        messages: &[ChatTurn],
+        max_tokens: i32,
         cancel: Arc<AtomicBool>,
         mut on_delta: F,
     ) -> AppResult<String>
@@ -142,7 +165,7 @@ impl LlmClient {
                 "model": self.model,
                 "messages": messages,
                 "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
+                "max_tokens": max_tokens,
                 "stream": true
             }))
             .send()
@@ -151,10 +174,7 @@ impl LlmClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(AppError::Message(format!(
-                "模型服务返回 {status}：{}",
-                body.chars().take(400).collect::<String>()
-            )));
+            return Err(AppError::Message(format_http_error(status.as_u16(), &body)));
         }
 
         let mut stream = response.bytes_stream();
@@ -186,6 +206,62 @@ impl LlmClient {
         }
         Ok(full)
     }
+}
+
+fn clean_error_body(body: &str) -> String {
+    let mut text = String::new();
+    let mut in_tag = false;
+    for ch in body.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                text.push(' ');
+            }
+            _ if !in_tag => text.push(ch),
+            _ => {}
+        }
+    }
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(400)
+        .collect()
+}
+
+fn format_http_error(status: u16, body: &str) -> String {
+    let clean = clean_error_body(body);
+    if status == 504 {
+        return "模型服务网关超时（504）。上游代理在长请求完成前中断了连接，应用会尝试自动重试。"
+            .into();
+    }
+    if status == 502 || status == 503 {
+        return format!("模型服务暂时不可用（{status}），应用会尝试自动重试。");
+    }
+    if clean.is_empty() {
+        format!("模型服务返回 {status}")
+    } else {
+        format!("模型服务返回 {status}：{clean}")
+    }
+}
+
+pub fn is_transient_model_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "502",
+        "503",
+        "504",
+        "gateway timeout",
+        "timeout",
+        "timed out",
+        "模型请求失败",
+        "读取流式响应失败",
+        "连接失败",
+        "暂时不可用",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 pub fn parse_completion_body(body: &str) -> AppResult<CompletionOutput> {
@@ -600,6 +676,9 @@ pub fn chat_system_prompt(mode: &str, premise: Option<&Value>, constraints: &[St
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
     use super::*;
 
     #[test]
@@ -623,5 +702,62 @@ mod tests {
         let output = parse_completion_body(body).unwrap();
         assert!(output.truncated);
         assert_eq!(output.finish_reason.as_deref(), Some("length"));
+    }
+
+    #[test]
+    fn turns_gateway_html_into_readable_timeout_error() {
+        let message = format_http_error(
+            504,
+            "<html><head><title>504 Gateway Time-out</title></head><body>nginx</body></html>",
+        );
+        assert!(message.contains("网关超时"));
+        assert!(!message.contains("<html>"));
+        assert!(is_transient_model_error(&message));
+    }
+
+    #[test]
+    fn does_not_retry_authentication_errors() {
+        let message = format_http_error(401, r#"{"error":"invalid api key"}"#);
+        assert!(!is_transient_model_error(&message));
+    }
+
+    #[tokio::test]
+    async fn streams_long_structured_response() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let events = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ok\\\":\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"true}\"}}]}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                events.len(),
+                events
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        let client = LlmClient::new(
+            &ModelConfig {
+                base_url: format!("http://{address}/v1"),
+                model: "stream-test".into(),
+                temperature: 0.2,
+                max_tokens: 1000,
+                embedding_model: None,
+                has_api_key: true,
+            },
+            "test-key".into(),
+        )
+        .unwrap();
+        let text = client
+            .complete_streaming(&[ChatTurn::user("return json")], 100)
+            .await
+            .unwrap();
+        assert_eq!(text, "{\"ok\":true}");
+        server.join().unwrap();
     }
 }

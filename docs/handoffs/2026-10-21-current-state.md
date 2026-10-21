@@ -53,6 +53,7 @@ CanonWeave 已从固定十章原型升级为可伸缩的长篇工作台：
 - `src-tauri/src/commands/outline.rs`
 - `src-tauri/src/outline.rs`
 - `src/features/seed/OutlinePanel.tsx`
+- 蓝本长请求使用流式响应，并对瞬时 502/503/504 自动重试。
 - 蓝本生成后先做确定性诊断，错误项最多自动修复两轮。
 - 候选蓝本可编辑；确认后不可静默改写。
 - 章节骨架按每批 16 章生成。

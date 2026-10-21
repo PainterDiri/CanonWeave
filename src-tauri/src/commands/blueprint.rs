@@ -9,19 +9,56 @@ use crate::{
     },
     error::IpcResult,
     llm::{
-        narrative_chain_system_prompt, narrative_chain_user_prompt,
+        is_transient_model_error, narrative_chain_system_prompt, narrative_chain_user_prompt,
         narrative_foundation_system_prompt, narrative_foundation_user_prompt,
         narrative_repair_system_prompt, narrative_repair_user_prompt, parse_json_loose, ChatTurn,
+        LlmClient,
     },
     seed,
     state::AppState,
 };
 
+async fn complete_blueprint_request(
+    client: &LlmClient,
+    messages: &[ChatTurn],
+    max_tokens: i32,
+) -> Result<String, String> {
+    let mut last_error = String::new();
+    for attempt in 0..3 {
+        match client.complete_streaming(messages, max_tokens).await {
+            Ok(text) if !text.trim().is_empty() => return Ok(text),
+            Ok(_) => {
+                last_error = "模型没有返回文本".into();
+            }
+            Err(error) => {
+                let message = error.to_string();
+                let stream_unsupported = message.contains("400")
+                    || message.to_lowercase().contains("stream")
+                    || message.contains("流式");
+                if stream_unsupported && !is_transient_model_error(&message) {
+                    return client
+                        .complete(messages, Some(max_tokens))
+                        .await
+                        .map_err(|fallback| fallback.to_string());
+                }
+                if !is_transient_model_error(&message) {
+                    return Err(message);
+                }
+                last_error = message;
+            }
+        }
+        if attempt < 2 {
+            tokio::time::sleep(std::time::Duration::from_secs((attempt + 1) as u64)).await;
+        }
+    }
+    Err(format!(
+        "{last_error}。已自动重试 3 次仍失败，请检查模型服务状态或稍后再试"
+    ))
+}
+
 #[tauri::command]
 #[specta::specta]
-pub fn blueprint_current(
-    state: State<'_, AppState>,
-) -> IpcResult<Option<NarrativeBlueprintView>> {
+pub fn blueprint_current(state: State<'_, AppState>) -> IpcResult<Option<NarrativeBlueprintView>> {
     state
         .with_project(|loaded| blueprint::current(&loaded.conn, &loaded.summary.id))
         .map_err(|error| error.to_string())
@@ -63,38 +100,36 @@ pub async fn blueprint_generate(
         (loaded.summary.id.clone(), premise.id, value)
     };
 
-    let foundation_raw = client
-        .complete(
-            &[
-                ChatTurn::system(narrative_foundation_system_prompt()),
-                ChatTurn::user(narrative_foundation_user_prompt(
-                    &premise,
-                    &input.medium,
-                    &input.structure_strategy,
-                    input.target_units,
-                )),
-            ],
-            Some(client.max_tokens.max(9000)),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+    let foundation_raw = complete_blueprint_request(
+        &client,
+        &[
+            ChatTurn::system(narrative_foundation_system_prompt()),
+            ChatTurn::user(narrative_foundation_user_prompt(
+                &premise,
+                &input.medium,
+                &input.structure_strategy,
+                input.target_units,
+            )),
+        ],
+        client.max_tokens.max(9000),
+    )
+    .await?;
     let mut foundation: Value =
         parse_json_loose(&foundation_raw).map_err(|error| format!("叙事地基解析失败：{error}"))?;
 
-    let chain_raw = client
-        .complete(
-            &[
-                ChatTurn::system(narrative_chain_system_prompt()),
-                ChatTurn::user(narrative_chain_user_prompt(
-                    &foundation,
-                    &input.medium,
-                    &input.structure_strategy,
-                )),
-            ],
-            Some(client.max_tokens.max(9000)),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+    let chain_raw = complete_blueprint_request(
+        &client,
+        &[
+            ChatTurn::system(narrative_chain_system_prompt()),
+            ChatTurn::user(narrative_chain_user_prompt(
+                &foundation,
+                &input.medium,
+                &input.structure_strategy,
+            )),
+        ],
+        client.max_tokens.max(9000),
+    )
+    .await?;
     let mut chain: Value =
         parse_json_loose(&chain_raw).map_err(|error| format!("逻辑链解析失败：{error}"))?;
 
@@ -127,19 +162,19 @@ pub async fn blueprint_generate(
         }
         last_view = Some(view);
         let diagnostics = serde_json::to_value(&errors).map_err(|error| error.to_string())?;
-        let repair_raw = match client
-            .complete(
-                &[
-                    ChatTurn::system(narrative_repair_system_prompt()),
-                    ChatTurn::user(narrative_repair_user_prompt(
-                        &foundation,
-                        &chain,
-                        &diagnostics,
-                    )),
-                ],
-                Some(client.max_tokens.max(9000)),
-            )
-            .await
+        let repair_raw = match complete_blueprint_request(
+            &client,
+            &[
+                ChatTurn::system(narrative_repair_system_prompt()),
+                ChatTurn::user(narrative_repair_user_prompt(
+                    &foundation,
+                    &chain,
+                    &diagnostics,
+                )),
+            ],
+            client.max_tokens.max(9000),
+        )
+        .await
         {
             Ok(raw) => raw,
             Err(_) => return Ok(last_view.expect("last candidate view exists")),
@@ -206,9 +241,7 @@ pub fn blueprint_logic_context(
 
 #[tauri::command]
 #[specta::specta]
-pub fn blueprint_nodes(
-    state: State<'_, AppState>,
-) -> IpcResult<Vec<NarrativeLogicNode>> {
+pub fn blueprint_nodes(state: State<'_, AppState>) -> IpcResult<Vec<NarrativeLogicNode>> {
     state
         .with_project(|loaded| {
             Ok(blueprint::current(&loaded.conn, &loaded.summary.id)?
