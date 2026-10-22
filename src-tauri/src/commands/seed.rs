@@ -25,13 +25,29 @@ fn client(state: &AppState) -> Result<LlmClient, String> {
     LlmClient::new(&config, key).map_err(|e| e.to_string())
 }
 
-async fn generate_directions(client: &LlmClient, logline: &str) -> Result<String, String> {
+async fn generate_directions(
+    client: &LlmClient,
+    logline: &str,
+    current: Option<&Value>,
+) -> Result<String, String> {
+    let refinement = current
+        .map(|premise| {
+            format!(
+                "\n\n当前种子卡：\n{premise}\n\n作者这次的修改意见：\n{logline}\n\n\
+                 请保留作者明确满意的部分，只针对反馈重做不足字段，并给出三个可替换的强化方向。"
+            )
+        })
+        .unwrap_or_else(|| format!("\n\n作者灵感：\n{logline}"));
     let budget = client.max_tokens.max(4096);
     let first = client
         .complete_with_meta(
             &[
                 ChatTurn::system(seed_system_prompt()),
-                ChatTurn::user(seed_user_prompt(logline)),
+                ChatTurn::user(if current.is_some() {
+                    refinement.clone()
+                } else {
+                    seed_user_prompt(logline)
+                }),
             ],
             Some(budget),
         )
@@ -50,7 +66,7 @@ async fn generate_directions(client: &LlmClient, logline: &str) -> Result<String
             &[
                 ChatTurn::system(seed_compact_system_prompt()),
                 ChatTurn::user(format!(
-                    "作者灵感：\n{logline}\n\n请只输出 3 项精简 JSON，确保数组完整闭合。"
+                    "{refinement}\n\n请只输出 3 项精简 JSON，确保数组完整闭合。"
                 )),
             ],
             Some(budget),
@@ -85,27 +101,34 @@ pub async fn seed_generate(
         return Err("请至少写一个具体的画面或冲突".into());
     }
     let client = client(&state)?;
-    let (project_id, session_id, user_message_id) = {
+    let (project_id, session_id, user_message_id, current_premise) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let sessions =
-            chat::list(&loaded.conn, &pid, Some("seed"), false).map_err(|e| e.to_string())?;
-        let session = match sessions.into_iter().next() {
-            Some(session) => session,
-            None => chat::create(
-                &loaded.conn,
-                &pid,
-                &ChatSessionCreateInput {
-                    scope: "seed".into(),
-                    mode: "diverge".into(),
-                    title: Some("灵感孵化".into()),
-                    scene_id: None,
-                    branch_id: None,
-                    parent_session_id: None,
-                },
-            )
-            .map_err(|e| e.to_string())?,
+        let session = match input.session_id.as_deref() {
+            Some(session_id) => {
+                chat::get(&loaded.conn, &pid, session_id).map_err(|e| e.to_string())?
+            }
+            None => {
+                let sessions = chat::list(&loaded.conn, &pid, Some("seed"), false)
+                    .map_err(|e| e.to_string())?;
+                match sessions.into_iter().next() {
+                    Some(session) => session,
+                    None => chat::create(
+                        &loaded.conn,
+                        &pid,
+                        &ChatSessionCreateInput {
+                            scope: "seed".into(),
+                            mode: "diverge".into(),
+                            title: Some("灵感孵化".into()),
+                            scene_id: None,
+                            branch_id: None,
+                            parent_session_id: None,
+                        },
+                    )
+                    .map_err(|e| e.to_string())?,
+                }
+            }
         };
         let message = chat::append_message(
             &loaded.conn,
@@ -116,10 +139,17 @@ pub async fn seed_generate(
             "",
         )
         .map_err(|e| e.to_string())?;
-        (pid, session.id, message.id)
+        let current_premise = seed::list(&loaded.conn, &pid)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
+            .map(|premise| serde_json::to_value(premise))
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        (pid, session.id, message.id, current_premise)
     };
 
-    let raw = generate_directions(&client, input.logline.trim()).await?;
+    let raw = generate_directions(&client, input.logline.trim(), current_premise.as_ref()).await?;
     let directions: Vec<Value> = parse_json_loose(&raw).map_err(|e| e.to_string())?;
 
     let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;

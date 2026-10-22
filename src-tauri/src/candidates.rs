@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::{json, Value};
 
 use crate::{
-    domain::{Candidate, CandidateAcceptResult, CandidateCounts, ReviewQueue},
+    domain::{Candidate, CandidateAcceptResult, CandidateCounts, ReviewQueue, StyleProfileInput},
     error::{AppError, AppResult},
     now,
 };
@@ -70,7 +70,7 @@ pub fn risk_for(kind: &str, payload: &Value, has_source: bool) -> &'static str {
             }
         }
         "entity" | "rule" | "style_sample" | "scene_goal" => "L1",
-        "knowledge_entry" | "outline_patch" => "L2",
+        "knowledge_entry" | "outline_patch" | "style_profile" => "L2",
         _ => "L2",
     }
 }
@@ -604,6 +604,11 @@ pub fn accept(
             )?;
             id
         }
+        "style_profile" => {
+            let input: StyleProfileInput = serde_json::from_value(payload.clone())
+                .map_err(|error| AppError::Message(format!("文笔档案候选格式无效：{error}")))?;
+            crate::style::save(&tx, project_id, &input)?.id
+        }
         "knowledge_entry" => {
             crate::knowledge::apply_confirmed_candidate(&tx, project_id, &payload)?
         }
@@ -775,6 +780,7 @@ fn table_for_kind(kind: &str) -> Option<&'static str> {
         "promise" => Some("promise"),
         "rule" => Some("rule"),
         "style_sample" => Some("style_sample"),
+        "style_profile" => Some("style_profile"),
         "scene_goal" => Some("outline_node"),
         "knowledge_entry" => Some("knowledge_entry"),
         "outline_patch" => Some("outline_node"),
@@ -1222,6 +1228,46 @@ mod tests {
         let close_index = listed.iter().position(|item| item.id == close.id).unwrap();
         let far_index = listed.iter().position(|item| item.id == far.id).unwrap();
         assert!(close_index < far_index);
+    }
+
+    #[test]
+    fn style_profile_candidate_only_applies_after_accept() {
+        let (_dir, mut loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        let preset = crate::style::presets().first().unwrap();
+        let input = StyleProfileInput {
+            id: None,
+            scope: "project".into(),
+            scope_id: None,
+            name: "Agent 文笔方案".into(),
+            pov: "第三人称".into(),
+            person: "第三人称".into(),
+            tense: "过去时".into(),
+            syntax: preset.syntax.clone(),
+            lexicon: preset.lexicon.clone(),
+            imagery: preset.imagery.clone(),
+            rhetoric: preset.rhetoric.clone(),
+            emotion: preset.emotion.clone(),
+            ratios: preset.ratios.clone(),
+            anti_style: preset.anti_style.clone(),
+        };
+        let candidate = insert(
+            &loaded.conn,
+            &pid,
+            "style_profile",
+            serde_json::to_value(&input).unwrap(),
+            Some("agent:style:test"),
+            None,
+            0.8,
+        )
+        .unwrap();
+        assert_eq!(candidate.risk_level, "L2");
+        assert!(crate::style::list(&loaded.conn, &pid).unwrap().is_empty());
+        let result = accept(&mut loaded.conn, &pid, &candidate.id).unwrap();
+        assert!(!result.created_id.is_empty());
+        let profiles = crate::style::list(&loaded.conn, &pid).unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].name, "Agent 文笔方案");
     }
 
     #[test]

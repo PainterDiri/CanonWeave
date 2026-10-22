@@ -27,6 +27,7 @@ import {
   type AgentRun,
   type AgentRunCreateInput,
   type AgentRunDetail,
+  type AgentNextAction,
   type AgentStep,
   type AgentToolDefinition,
   type Candidate,
@@ -110,6 +111,7 @@ const kindLabels: Record<string, string> = {
   claim: "事实",
   rule: "规则",
   scene_goal: "章节目标",
+  style_profile: "文笔档案",
 };
 
 function statusBadge(status: string) {
@@ -200,12 +202,13 @@ export function AgentPage() {
   const setNav = useAppStore((state) => state.setNav);
   const notify = useAppStore((state) => state.notify);
   const refreshProject = useAppStore((state) => state.refreshProject);
-  const [surface, setSurface] = useState<Surface>("workspace");
+  const [surface, setSurface] = useState<Surface>("chat");
   const [premise, setPremise] = useState<Premise | null>(null);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [active, setActive] = useState<AgentRunDetail | null>(null);
   const [foundation, setFoundation] = useState<FoundationReport | null>(null);
   const [tools, setTools] = useState<AgentToolDefinition[]>([]);
+  const [nextActions, setNextActions] = useState<AgentNextAction[]>([]);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [inspecting, setInspecting] = useState<Candidate | null>(null);
   const [goal, setGoal] = useState(templates[0].goal);
@@ -232,21 +235,35 @@ export function AgentPage() {
   }, []);
 
   const refreshOverview = useCallback(async () => {
-    const [nextRuns, nextFoundation, nextTools] = await Promise.all([
+    const [nextRuns, nextFoundation, nextTools, actions] = await Promise.all([
       ipc.agentRuns(40),
       ipc.agentFoundation(),
       ipc.agentTools(),
+      ipc.agentNextActions(),
     ]);
     setRuns(nextRuns);
     setFoundation(nextFoundation);
     setTools(nextTools);
+    setNextActions(actions);
     return nextRuns;
   }, []);
+
+  const refreshWorkflow = useCallback(async () => {
+    const [premises] = await Promise.all([
+      ipc.premiseList().catch(() => []),
+      refreshOverview(),
+      refreshProject(),
+    ]);
+    setPremise(premises[0] ?? null);
+  }, [refreshOverview, refreshProject]);
 
   useEffect(() => {
     (async () => {
       try {
-        void ipc.premiseActive().then(setPremise).catch(() => setPremise(null));
+        void ipc
+          .premiseList()
+          .then((items) => setPremise(items[0] ?? null))
+          .catch(() => setPremise(null));
         const nextRuns = await refreshOverview();
         if (nextRuns[0]) await loadRun(nextRuns[0].id);
       } catch (cause) {
@@ -400,10 +417,20 @@ export function AgentPage() {
   return (
     <div className="fade-in mx-auto max-w-[1440px] px-5 py-5">
       <SectionTitle
-        title="Agent 项目工作台"
+        title="Agent 协作工作流"
         action={
           <div className="flex items-center gap-2">
             <div className="flex rounded-full border border-line bg-paper-raised p-0.5">
+              <button
+                onClick={() => setSurface("chat")}
+                className={`rounded-full px-3 py-1.5 text-[10.5px] ${
+                  surface === "chat"
+                    ? "bg-teal text-paper-raised"
+                    : "text-muted hover:text-ink"
+                }`}
+              >
+                对话
+              </button>
               <button
                 onClick={() => setSurface("workspace")}
                 className={`rounded-full px-3 py-1.5 text-[10.5px] ${
@@ -412,15 +439,7 @@ export function AgentPage() {
                     : "text-muted hover:text-ink"
                 }`}
               >
-                任务执行
-              </button>
-              <button
-                onClick={() => setSurface("chat")}
-                className={`rounded-full px-3 py-1.5 text-[10.5px] ${
-                  surface === "chat" ? "bg-teal text-paper-raised" : "text-muted hover:text-ink"
-                }`}
-              >
-                自由讨论
+                执行记录
               </button>
             </div>
             <Badge tone="teal">只读自动执行</Badge>
@@ -430,7 +449,12 @@ export function AgentPage() {
       />
 
       {surface === "chat" ? (
-        <ChatWorkspace premise={premise} surface="agent" />
+        <ChatWorkspace
+          premise={premise}
+          surface="agent"
+          nextActions={nextActions}
+          onWorkflowComplete={refreshWorkflow}
+        />
       ) : (
         <div className="grid grid-cols-[220px_minmax(0,1fr)_286px] gap-3">
           <aside className="paper-card flex h-[calc(100vh-156px)] min-h-[560px] flex-col overflow-hidden">

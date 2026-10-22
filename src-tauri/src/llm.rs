@@ -702,11 +702,12 @@ pub fn chat_system_prompt(mode: &str, premise: Option<&Value>, constraints: &[St
 - 不要把建议写成既成事实；区分「建议」与「已确认」。
 - 不要替作者决定审美判断，不要自动发布内容。
 - 面对多步骤请求时，先给出简短任务计划，再执行当前回复能完成的部分。
+- 项目快照会提供系统建议的下一步。回答末尾用一行“下一步：”给出一个最具体、立即可执行的动作，并说明完成标准。
 - 回答使用中文，简洁具体。"#
     );
     if let Some(premise) = premise {
         prompt.push_str(&format!(
-            "\n\n已确认种子卡（创作契约，不是世界事实）：\n{premise}"
+            "\n\n当前种子卡（若 status 不是 confirmed，则仍是候选，不是正式创作契约）：\n{premise}"
         ));
     }
     if !constraints.is_empty() {

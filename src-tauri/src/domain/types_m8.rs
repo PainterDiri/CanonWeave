@@ -107,6 +107,27 @@ pub struct AgentProgressEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentNextAction {
+    pub key: String,
+    pub label: String,
+    pub description: String,
+    pub prompt: String,
+    pub action: String,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StyleRecommendation {
+    pub preset_id: String,
+    pub preset_name: String,
+    pub reason: String,
+    pub message: crate::domain::ChatMessage,
+    pub candidate: crate::domain::Candidate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
 pub struct FoundationCheck {
     pub code: String,
     pub label: String,

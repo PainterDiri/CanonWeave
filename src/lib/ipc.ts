@@ -125,6 +125,8 @@ export type {
   AgentStep,
   AgentEvidence,
   AgentToolDefinition,
+  AgentNextAction,
+  StyleRecommendation,
   FoundationReport,
   FoundationCheck,
   EmbeddingIndexResult,
@@ -219,8 +221,8 @@ export const ipc = {
     return unwrap(await commands.modelTest());
   },
 
-  seedGenerate: (logline: string) =>
-    guarded(async () => unwrap(await commands.seedGenerate({ logline }))),
+  seedGenerate: (logline: string, sessionId: string | null = null) =>
+    guarded(async () => unwrap(await commands.seedGenerate({ logline, sessionId }))),
   premiseList: () => guarded(async () => unwrap(await commands.premiseList())),
   premiseActive: () => guarded(async () => unwrap(await commands.premiseActive())),
   premiseUpdate: (id: string, input: PremiseInput) =>
@@ -275,6 +277,10 @@ export const ipc = {
     guarded(async () => unwrap(await commands.chatCapture(input))),
   chatCandidates: (sessionId: string) =>
     guarded(async () => unwrap(await commands.chatCandidates(sessionId))),
+  chatAppendUser: (sessionId: string, content: string) =>
+    guarded(async () => unwrap(await commands.chatAppendUser(sessionId, content))),
+  chatAppendAssistant: (sessionId: string, content: string) =>
+    guarded(async () => unwrap(await commands.chatAppendAssistant(sessionId, content))),
 
   outlineList: () => guarded(async () => unwrap(await commands.outlineList())),
   outlineGenerate: (input: OutlineGenerateInput) =>
@@ -485,6 +491,10 @@ export const ipc = {
     guarded(async () => unwrap(await commands.agentRunRetryStep(runId, stepId))),
   agentFoundation: () =>
     guarded(async () => unwrap(await commands.agentFoundation())),
+  agentNextActions: () =>
+    guarded(async () => unwrap(await commands.agentNextActions())),
+  agentStyleProposal: (sessionId: string, instruction: string) =>
+    guarded(async () => unwrap(await commands.agentStyleProposal(sessionId, instruction))),
 
   embeddingStatus: () =>
     guarded(async () => unwrap(await commands.embeddingStatus())),

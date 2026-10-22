@@ -92,6 +92,8 @@ export const commands = {
 	chatSend: (input: ChatSendInput) => typedError<ChatSendResult, string>(__TAURI_INVOKE("chat_send", { input })),
 	chatCancel: (requestId: string) => typedError<null, string>(__TAURI_INVOKE("chat_cancel", { requestId })),
 	chatCandidates: (sessionId: string) => typedError<Candidate[], string>(__TAURI_INVOKE("chat_candidates", { sessionId })),
+	chatAppendUser: (sessionId: string, content: string) => typedError<ChatMessage, string>(__TAURI_INVOKE("chat_append_user", { sessionId, content })),
+	chatAppendAssistant: (sessionId: string, content: string) => typedError<ChatMessage, string>(__TAURI_INVOKE("chat_append_assistant", { sessionId, content })),
 	outlineList: () => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_list")),
 	outlineGenerate: (input: OutlineGenerateInput) => typedError<OutlineNode[], string>(__TAURI_INVOKE("outline_generate", { input })),
 	outlineUpdate: (input: OutlineUpdateInput) => typedError<OutlineNode, string>(__TAURI_INVOKE("outline_update", { input })),
@@ -196,6 +198,8 @@ export const commands = {
 	agentRunResume: (id: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_resume", { id })),
 	agentRunRetryStep: (runId: string, stepId: string) => typedError<AgentRunDetail, string>(__TAURI_INVOKE("agent_run_retry_step", { runId, stepId })),
 	agentFoundation: () => typedError<FoundationReport, string>(__TAURI_INVOKE("agent_foundation")),
+	agentNextActions: () => typedError<AgentNextAction[], string>(__TAURI_INVOKE("agent_next_actions")),
+	agentStyleProposal: (sessionId: string, instruction: string) => typedError<StyleRecommendation, string>(__TAURI_INVOKE("agent_style_proposal", { sessionId, instruction })),
 	embeddingStatus: () => typedError<EmbeddingStatus, string>(__TAURI_INVOKE("embedding_status")),
 	embeddingTest: () => typedError<ModelTestResult, string>(__TAURI_INVOKE("embedding_test")),
 	embeddingIndex: (rebuild: boolean) => typedError<EmbeddingIndexResult, string>(__TAURI_INVOKE("embedding_index", { rebuild })),
@@ -213,6 +217,15 @@ export type AgentEvidence = {
 	sourceSpan: string,
 	quote: string,
 	createdAt: string,
+};
+
+export type AgentNextAction = {
+	key: string,
+	label: string,
+	description: string,
+	prompt: string,
+	action: string,
+	priority: number,
 };
 
 export type AgentRun = {
@@ -1304,6 +1317,7 @@ export type SceneRecord = {
 
 export type SeedGenerateInput = {
 	logline: string,
+	sessionId?: string | null,
 };
 
 export type SeedGenerateResult = {
@@ -1442,6 +1456,14 @@ export type StyleRatios = {
 	dialogue: number,
 	description: number,
 	interiority: number,
+};
+
+export type StyleRecommendation = {
+	presetId: string,
+	presetName: string,
+	reason: string,
+	message: ChatMessage,
+	candidate: Candidate,
 };
 
 export type StyleRhetoric = {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{Emitter, State};
 
 use crate::{
-    candidates, chat,
+    agent, candidates, chat,
     domain::{
         Candidate, CandidateCaptureInput, ChatDeltaEvent, ChatErrorEvent, ChatFinishedEvent,
         ChatMessage, ChatSendInput, ChatSendResult, ChatSession, ChatSessionCreateInput,
@@ -55,7 +55,10 @@ pub fn chat_session_get(state: State<'_, AppState>, id: String) -> IpcResult<Cha
 
 #[tauri::command]
 #[specta::specta]
-pub fn chat_messages_list(sys: State<'_, AppState>, session_id: String) -> IpcResult<Vec<ChatMessage>> {
+pub fn chat_messages_list(
+    sys: State<'_, AppState>,
+    session_id: String,
+) -> IpcResult<Vec<ChatMessage>> {
     sys.with_project(|loaded| chat::messages(&loaded.conn, &loaded.summary.id, &session_id))
         .map_err(|e| e.to_string())
 }
@@ -112,14 +115,20 @@ pub fn chat_session_delete(state: State<'_, AppState>, id: String) -> IpcResult<
 #[tauri::command]
 #[specta::specta]
 pub fn chat_session_fork(state: State<'_, AppState>, id: String) -> IpcResult<ChatSession> {
-    let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏".to_string())?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(|_| "项目状态锁已损坏".to_string())?;
     let loaded = guard.as_mut().ok_or("尚未打开项目")?;
     chat::fork(&mut loaded.conn, &loaded.summary.id, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn chat_capture(sys: State<'_, AppState>, input: CandidateCaptureInput) -> IpcResult<Candidate> {
+pub fn chat_capture(
+    sys: State<'_, AppState>,
+    input: CandidateCaptureInput,
+) -> IpcResult<Candidate> {
     sys.with_project(|loaded| {
         chat::capture(
             &loaded.conn,
@@ -135,13 +144,17 @@ pub fn chat_capture(sys: State<'_, AppState>, input: CandidateCaptureInput) -> I
 
 #[tauri::command]
 #[specta::specta]
-pub async fn chat_summary(state: State<'_, AppState>, session_id: String) -> IpcResult<ChatSession> {
+pub async fn chat_summary(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> IpcResult<ChatSession> {
     let client = super::seed::require_client(&state).map_err(|e| e.to_string())?;
     let (project_id, messages, current) = {
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let messages = chat::messages(&loaded.conn, &pid, &session_id).map_err(|e| e.to_string())?;
+        let messages =
+            chat::messages(&loaded.conn, &pid, &session_id).map_err(|e| e.to_string())?;
         let current = chat::get(&loaded.conn, &pid, &session_id).map_err(|e| e.to_string())?;
         (pid, messages, current)
     };
@@ -191,7 +204,8 @@ pub async fn chat_send(
         let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let pid = loaded.summary.id.clone();
-        let session = chat::get(&loaded.conn, &pid, &input.session_id).map_err(|e| e.to_string())?;
+        let session =
+            chat::get(&loaded.conn, &pid, &input.session_id).map_err(|e| e.to_string())?;
         let user_message = chat::append_message(
             &loaded.conn,
             &pid,
@@ -203,8 +217,10 @@ pub async fn chat_send(
         .map_err(|e| e.to_string())?;
         let messages = chat::history_window(&loaded.conn, &pid, &input.session_id, 12)
             .map_err(|e| e.to_string())?;
-        let premise = seed::active(&loaded.conn, &pid)
+        let premise = seed::list(&loaded.conn, &pid)
             .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
             .and_then(|p| serde_json::to_value(p).ok());
         let knowledge_context = crate::knowledge::prompt_context(&loaded.conn, &pid, 30)
             .map_err(|error| error.to_string())?;
@@ -224,6 +240,19 @@ pub async fn chat_send(
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
+        let next_actions =
+            agent::next_actions(&loaded.conn, &pid).map_err(|error| error.to_string())?;
+        let next_action_context = next_actions
+            .iter()
+            .take(3)
+            .map(|action| {
+                format!(
+                    "- {}：{}（动作 {}）",
+                    action.label, action.description, action.action
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut promise_stmt = loaded
             .conn
             .prepare(
@@ -247,7 +276,7 @@ pub async fn chat_send(
         drop(promise_stmt);
         let project_context = format!(
             "待处理冲突：{open_issues}\n待确认候选：{pending_candidates}\n\
-             未结伏笔：\n{}\n作者确认的知识库：\n{}",
+             未结伏笔：\n{}\n作者确认的知识库：\n{}\n系统建议的下一步（优先从这些动作中引导，但以作者当前问题为主）：\n{}",
             if promises.is_empty() {
                 "无".to_string()
             } else {
@@ -257,6 +286,11 @@ pub async fn chat_send(
                 "无".to_string()
             } else {
                 knowledge_context
+            },
+            if next_action_context.is_empty() {
+                "无".to_string()
+            } else {
+                next_action_context
             }
         );
         let _ = user_message;
@@ -381,7 +415,10 @@ pub fn chat_cancel(state: State<'_, AppState>, request_id: String) -> IpcResult<
 
 #[tauri::command]
 #[specta::specta]
-pub fn chat_candidates(state: State<'_, AppState>, session_id: String) -> IpcResult<Vec<Candidate>> {
+pub fn chat_candidates(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> IpcResult<Vec<Candidate>> {
     state
         .with_project(|loaded| {
             let pid = &loaded.summary.id;
@@ -403,3 +440,49 @@ pub fn chat_candidates(state: State<'_, AppState>, session_id: String) -> IpcRes
         .map_err(|e| e.to_string())
 }
 
+fn append_message(
+    state: &AppState,
+    session_id: &str,
+    role: &str,
+    content: &str,
+    model: &str,
+) -> IpcResult<ChatMessage> {
+    if content.trim().is_empty() {
+        return Err("消息不能为空".into());
+    }
+    if !["user", "assistant"].contains(&role) {
+        return Err("只能追加用户或助手消息".into());
+    }
+    state
+        .with_project(|loaded| {
+            chat::append_message(
+                &loaded.conn,
+                &loaded.summary.id,
+                session_id,
+                role,
+                content.trim(),
+                model,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn chat_append_user(
+    state: State<'_, AppState>,
+    session_id: String,
+    content: String,
+) -> IpcResult<ChatMessage> {
+    append_message(&state, &session_id, "user", &content, "")
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn chat_append_assistant(
+    state: State<'_, AppState>,
+    session_id: String,
+    content: String,
+) -> IpcResult<ChatMessage> {
+    append_message(&state, &session_id, "assistant", &content, "agent-workflow")
+}

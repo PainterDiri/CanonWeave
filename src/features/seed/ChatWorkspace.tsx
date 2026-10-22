@@ -2,12 +2,15 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Archive,
+  ArrowRight,
   ArrowUp,
   Copy,
   CornerDownLeft,
+  ListChecks,
   LoaderCircle,
   MessageSquarePlus,
   Pin,
+  Sparkles,
   Square,
   Trash2,
 } from "lucide-react";
@@ -15,6 +18,7 @@ import { Badge, Button, Textarea } from "@/components/ui";
 import {
   ipc,
   onChatDelta,
+  type AgentNextAction,
   type BeatOption,
   type Candidate,
   type ChapterRecord,
@@ -41,12 +45,38 @@ const captureKinds = [
   { key: "style_sample", label: "文笔样本" },
 ];
 
+function detectWorkflowAction(content: string): string | null {
+  const text = content.trim();
+  if (/^\/灵感(?:\s|$)/.test(text)) return "seed_generate";
+  if (/^\/蓝本(?:\s|$)/.test(text)) return "blueprint_generate";
+  if (/^\/卷章(?:\s|$)/.test(text)) return "outline_generate";
+  if (/^\/文笔(?:\s|$)/.test(text)) return "style_proposal";
+  const actionVerb = /(生成|扩写|完善|打磨|重做|再来|给我|帮我|基于|根据)/;
+  if (actionVerb.test(text) && /(灵感|三个方向|三种方向|logline|一句话故事)/i.test(text)) {
+    return "seed_generate";
+  }
+  if (actionVerb.test(text) && /(叙事蓝本|蓝本|叙事地基|因果链)/.test(text)) {
+    return "blueprint_generate";
+  }
+  if (/(规划|生成|安排|重做)/.test(text) && /(卷章|章节骨架|大纲)/.test(text)) {
+    return "outline_generate";
+  }
+  if (/(推荐|设置|调整|确定|选择|给我)/.test(text) && /(文笔|叙事风格|写作风格)/.test(text)) {
+    return "style_proposal";
+  }
+  return null;
+}
+
 export function ChatWorkspace({
   premise,
   surface = "seed",
+  nextActions = [],
+  onWorkflowComplete,
 }: {
   premise: Premise | null;
   surface?: "seed" | "agent";
+  nextActions?: AgentNextAction[];
+  onWorkflowComplete?: () => void | Promise<void>;
 }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [active, setActive] = useState<ChatSession | null>(null);
@@ -57,6 +87,7 @@ export function ChatWorkspace({
   const [beats, setBeats] = useState<BeatOption[]>([]);
   const [beatInstruction, setBeatInstruction] = useState("");
   const [beatBusy, setBeatBusy] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
   const [sending, setSending] = useState(false);
@@ -66,6 +97,7 @@ export function ChatWorkspace({
   const scrollRef = useRef<HTMLDivElement>(null);
   const refreshProject = useAppStore((s) => s.refreshProject);
   const notify = useAppStore((s) => s.notify);
+  const setNav = useAppStore((s) => s.setNav);
 
   const loadSessions = useCallback(async (selectId?: string) => {
     const list = await ipc.chatSessions(null);
@@ -164,7 +196,7 @@ export function ChatWorkspace({
     }
   };
 
-  const send = async (preset?: string) => {
+  const sendChat = async (preset?: string) => {
     const content = (preset ?? input).trim();
     if (!content || !active || sending) return;
     setInput("");
@@ -204,6 +236,107 @@ export function ChatWorkspace({
       setSending(false);
       requestRef.current = null;
     }
+  };
+
+  const finishWorkflow = async () => {
+    if (!active) return;
+    await Promise.all([
+      loadActive(active),
+      loadSessions(active.id),
+      refreshProject(),
+      onWorkflowComplete?.(),
+    ]);
+  };
+
+  const runWorkflow = async (workflow: string, instruction: string) => {
+    if (!active || workflowBusy || sending) return;
+    const content =
+      instruction.trim() ||
+      (workflow === "seed_generate"
+        ? premise?.logline ?? ""
+        : "请根据当前项目状态执行这个工作流，并说明完成标准。");
+    if (workflow === "chat") {
+      await sendChat(content);
+      return;
+    }
+    if (workflow === "review_candidates") {
+      setNav("audit");
+      return;
+    }
+    if (workflow === "open_seed") {
+      setNav("seed");
+      return;
+    }
+    if (workflow === "open_studio") {
+      setNav("studio");
+      return;
+    }
+    if (workflow === "seed_generate" && content.trim().length < 4) {
+      setError("先在输入框写一个画面、冲突或一句话故事，再让 Agent 生成方向。");
+      return;
+    }
+    setWorkflowBusy(workflow);
+    setError(null);
+    try {
+      if (workflow === "seed_generate") {
+        const result = await ipc.seedGenerate(content, active.id);
+        notify(`已生成 ${result.directions.length} 个灵感方向，并保存在当前会话`);
+      } else if (workflow === "blueprint_generate") {
+        await ipc.chatAppendUser(active.id, content);
+        const view = await ipc.blueprintGenerate({
+          medium: "novel",
+          structureStrategy: "adaptive",
+          targetUnits: null,
+        });
+        const errors = view.diagnostics.filter((item) => item.severity === "error").length;
+        const warnings = view.diagnostics.filter((item) => item.severity === "warning").length;
+        await ipc.chatAppendAssistant(
+          active.id,
+          `已生成叙事蓝本候选《${view.blueprint.title}》，包含 ${view.elements.length} 条人物/势力/规则、${view.timeline.length} 个时间锚点、${view.nodes.length} 个逻辑节点。诊断：${errors} 阻断、${warnings} 提醒。\n\n下一步：先审阅叙事蓝本并处理阻断项，确认后才会用于卷章规划。`,
+        );
+        notify("叙事蓝本候选已生成；确认前不会进入正式规划");
+      } else if (workflow === "outline_generate") {
+        await ipc.chatAppendUser(active.id, content);
+        const nodes = await ipc.outlineGenerate({
+          mode: "adaptive",
+          totalChapters: null,
+          volumes: [],
+        });
+        await ipc.chatAppendAssistant(
+          active.id,
+          `已生成 ${nodes.length} 个卷章候选节点，并绑定已确认叙事蓝本的逻辑节点。\n\n下一步：逐项检查因果承接、节奏和角色行动，再确认进入正文工坊。`,
+        );
+        notify("卷章骨架候选已生成，请审阅后确认");
+      } else if (workflow === "style_proposal") {
+        const result = await ipc.agentStyleProposal(active.id, content);
+        notify(`已生成文笔方案候选：${result.presetName}`);
+      } else {
+        throw new Error(`未知 Agent 工作流：${workflow}`);
+      }
+      setInput("");
+      await finishWorkflow();
+      const pending = await ipc.chatCandidates(active.id);
+      setCandidates(pending.filter((candidate) => candidate.status === "pending"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      try {
+        await finishWorkflow();
+      } catch {
+        // Preserve the workflow error.
+      }
+    } finally {
+      setWorkflowBusy(null);
+    }
+  };
+
+  const send = async (preset?: string) => {
+    const content = (preset ?? input).trim();
+    const detected = surface === "agent" ? detectWorkflowAction(content) : null;
+    if (detected) {
+      await runWorkflow(detected, content);
+      return;
+    }
+    await sendChat(preset);
   };
 
   const cancel = async () => {
@@ -249,6 +382,7 @@ export function ChatWorkspace({
       const pending = await ipc.chatCandidates(active.id);
       setCandidates(pending.filter((c) => c.status === "pending"));
       await refreshProject();
+      await onWorkflowComplete?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -403,7 +537,7 @@ export function ChatWorkspace({
         <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
           <div className="flex items-center gap-3">
             <span className="max-w-[260px] truncate text-[12px] font-semibold text-ink">
-              {active?.title ?? (surface === "agent" ? "协作助手" : "创作对话")}
+              {active?.title ?? (surface === "agent" ? "Agent 对话" : "创作对话")}
             </span>
             <div className="flex rounded-full border border-line p-0.5">
               {modes.map((mode) => (
@@ -421,8 +555,49 @@ export function ChatWorkspace({
               ))}
             </div>
           </div>
-          {premise ? <Badge tone="teal">种子卡已注入</Badge> : <Badge tone="amber">无种子卡</Badge>}
+          {premise ? (
+            <Badge tone={premise.status === "confirmed" ? "teal" : "amber"}>
+              {premise.status === "confirmed" ? "种子卡已确认" : "种子卡候选"}
+            </Badge>
+          ) : (
+            <Badge tone="amber">无种子卡</Badge>
+          )}
         </div>
+
+        {surface === "agent" && nextActions.length > 0 ? (
+          <div className="flex items-start gap-3 border-b border-line bg-paper/55 px-4 py-2.5">
+            <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-soft text-teal">
+              <ListChecks size={12} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-[10px] font-semibold text-teal">
+                下一步
+                <span className="font-normal text-muted">{nextActions[0].description}</span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {nextActions.slice(0, 3).map((action, index) => (
+                  <button
+                    key={action.key}
+                    onClick={() => void runWorkflow(action.action, action.prompt)}
+                    disabled={Boolean(workflowBusy) || sending}
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[9.5px] transition disabled:opacity-50 ${
+                      index === 0
+                        ? "bg-teal text-paper-raised hover:bg-teal/90"
+                        : "border border-line bg-paper-raised text-ink-soft hover:border-teal/40 hover:text-teal"
+                    }`}
+                  >
+                    {workflowBusy === action.action ? (
+                      <LoaderCircle size={10} className="animate-spin" />
+                    ) : (
+                      <ArrowRight size={10} />
+                    )}
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {messages.length === 0 && !streaming ? (
@@ -484,6 +659,34 @@ export function ChatWorkspace({
         </div>
 
         <div className="border-t border-line px-4 py-3">
+          {surface === "agent" ? (
+            <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+              {[
+                ["seed_generate", "灵感方向", "生成或继续完善三套灵感方向"],
+                ["blueprint_generate", "叙事蓝本", "建立人物、规则、时间线与因果链候选"],
+                ["outline_generate", "卷章骨架", "把已确认蓝本规划为卷章候选"],
+                ["style_proposal", "文笔方案", "根据故事气质生成文笔档案候选"],
+              ].map(([workflow, label, description]) => (
+                <button
+                  key={workflow}
+                  title={description}
+                  onClick={() => void runWorkflow(workflow, input)}
+                  disabled={Boolean(workflowBusy) || sending}
+                  className="flex items-center gap-1 rounded-full border border-line bg-paper-raised px-2.5 py-1 text-[9.5px] text-ink-soft transition hover:border-teal/40 hover:text-teal disabled:opacity-50"
+                >
+                  {workflowBusy === workflow ? (
+                    <LoaderCircle size={10} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={10} />
+                  )}
+                  {label}
+                </button>
+              ))}
+              <span className="ml-auto text-[9px] text-muted">
+                也可以直接说“生成卷章骨架”或输入 /文笔
+              </span>
+            </div>
+          ) : null}
           {active?.mode === "plot" || beats.length > 0 ? (
             <div className="mb-2.5 rounded-lg border border-amber/20 bg-amber-soft/30 px-3 py-2.5">
               <div className="mb-2 flex items-center gap-2">
@@ -556,7 +759,7 @@ export function ChatWorkspace({
                 size="sm"
                 tone="primary"
                 onClick={() => void send()}
-                disabled={!input.trim() || sending || !active}
+                disabled={!input.trim() || sending || Boolean(workflowBusy) || !active}
                 icon={<ArrowUp size={13} />}
               >
                 发送
@@ -612,7 +815,7 @@ export function ChatWorkspace({
         <div className="min-h-0 flex-1 overflow-y-auto p-2.5">
           {candidates.length === 0 ? (
             <div className="px-2 py-8 text-center text-[10.5px] leading-5 text-muted">
-              在 AI 消息下选择“采纳为”，候选会出现在这里。
+              工作流生成的内容和 AI 消息“采纳为”的候选都会出现在这里。
             </div>
           ) : (
             <div className="space-y-2">
@@ -751,6 +954,7 @@ function candidateLabel(kind: string) {
       promise: "伏笔",
       rule: "规则",
       style_sample: "文笔样本",
+      style_profile: "文笔档案",
       scene_goal: "章节目标",
     }[kind] ?? kind
   );
@@ -780,6 +984,9 @@ export function summaryOf(candidate: Candidate): string {
     return `${p.level === "volume" ? "卷" : "章节"} · ${p.title ?? "未命名"}：${String(
       p.goal ?? "",
     ).slice(0, 60)}`;
+  }
+  if (candidate.kind === "style_profile") {
+    return `${p.name ?? "文笔档案"}：${String(p.agentReason ?? "等待作者确认具体文笔参数。").slice(0, 80)}`;
   }
   return String(p.text ?? p.description ?? p.title ?? "候选内容").slice(0, 90);
 }

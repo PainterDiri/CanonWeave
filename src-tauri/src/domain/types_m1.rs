@@ -69,6 +69,8 @@ pub struct PremiseInput {
 #[serde(rename_all = "camelCase")]
 pub struct SeedGenerateInput {
     pub logline: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

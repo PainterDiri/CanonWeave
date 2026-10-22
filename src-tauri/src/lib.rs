@@ -66,7 +66,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         premise_confirm, premise_archive, premise_debug_sources, blueprint_current, blueprint_candidate, blueprint_generate, blueprint_update, blueprint_confirm, blueprint_logic_context, blueprint_nodes, chat_session_create,
         chat_session_list, chat_session_get, chat_session_update, chat_session_archive,
         chat_session_unarchive, chat_session_delete, chat_session_fork, chat_messages_list,
-        chat_capture, chat_summary, chat_send, chat_cancel, chat_candidates, outline_list,
+        chat_capture, chat_summary, chat_send, chat_cancel, chat_candidates, chat_append_user,
+        chat_append_assistant, outline_list,
         outline_generate, outline_update, outline_confirm, outline_drop, outline_status,
         document_import, document_list, extraction_run, review_queue, candidate_list,
         candidate_accept, candidate_reject, candidate_update_payload, entity_list,
@@ -90,7 +91,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         voice_thresholds_save, voice_check, preference_summary, motif_list,
         motif_density_check, export_project, agent_tools, agent_runs, agent_run_create,
         agent_run_get, agent_run_execute, agent_run_pause, agent_run_cancel,
-        agent_run_resume, agent_run_retry_step, agent_foundation, embedding_status,
+        agent_run_resume, agent_run_retry_step, agent_foundation, agent_next_actions,
+        agent_style_proposal, embedding_status,
         embedding_test, embedding_index, embedding_cancel_index, hybrid_search
     ])
 }

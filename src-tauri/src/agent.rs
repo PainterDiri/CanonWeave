@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use crate::{
     domain::{
-        AgentEvidence, AgentRun, AgentRunCreateInput, AgentRunDetail, AgentStep,
+        AgentEvidence, AgentNextAction, AgentRun, AgentRunCreateInput, AgentRunDetail, AgentStep,
         AgentToolDefinition, FoundationReport,
     },
     error::{AppError, AppResult},
@@ -66,6 +66,70 @@ pub fn tools() -> Vec<AgentToolDefinition> {
                 "properties":{"query":{"type":"string"},"limit":{"type":"integer"}},
                 "required":["query"]
             }),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "search_hybrid",
+            "同时使用 FTS、实体图谱与可用向量召回项目证据。",
+            json!({
+                "type":"object",
+                "properties":{"query":{"type":"string"},"limit":{"type":"integer"}},
+                "required":["query"]
+            }),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "get_premise",
+            "读取当前种子卡与作者已确认的创作契约。",
+            empty.clone(),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "get_blueprint",
+            "读取当前已确认或待审的叙事蓝本、地基、时间线与逻辑链。",
+            empty.clone(),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "get_outline_plan",
+            "读取卷章骨架、逻辑节点绑定和确认状态。",
+            empty.clone(),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "get_style_profiles",
+            "读取项目文笔档案与作用域。",
+            empty.clone(),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "recommend_next_actions",
+            "根据灵感、地基、蓝本、卷章、文笔和正文状态计算下一步建议。",
+            empty.clone(),
             "read",
             "L0",
             false,
@@ -160,6 +224,66 @@ pub fn tools() -> Vec<AgentToolDefinition> {
             "read_knowledge_entry",
             "按知识条目 ID 读取作者确认内容。",
             json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "generate_premise_directions",
+            "根据作者的一句子或修改意见生成三套差异化的灵感方向候选。",
+            json!({"type":"object","properties":{"instruction":{"type":"string"}},"required":["instruction"]}),
+            "write",
+            "L1",
+            true,
+            true,
+            "candidate",
+        ),
+        tool(
+            "generate_narrative_blueprint",
+            "从已确认种子卡生成叙事地基、因果链和人物/势力/世界规则候选。",
+            json!({"type":"object","properties":{"medium":{"type":"string"},"structureStrategy":{"type":"string"},"targetUnits":{"type":"integer"}}}),
+            "write",
+            "L2",
+            true,
+            true,
+            "candidate",
+        ),
+        tool(
+            "generate_outline_plan",
+            "从已确认蓝本生成卷章骨架候选，可按自适应或作者指定结构规划。",
+            json!({"type":"object","properties":{"mode":{"type":"string"},"totalChapters":{"type":"integer"}}}),
+            "write",
+            "L2",
+            true,
+            true,
+            "candidate",
+        ),
+        tool(
+            "propose_style_profile",
+            "根据故事气质和作者要求推荐文笔预设，并生成待确认的文笔档案候选。",
+            json!({"type":"object","properties":{"instruction":{"type":"string"}},"required":["instruction"]}),
+            "write",
+            "L2",
+            true,
+            true,
+            "candidate",
+        ),
+        tool(
+            "rebuild_wiki",
+            "重建 Narrative Wiki 派生页面，保留作者修订并刷新页面依赖。",
+            empty.clone(),
+            "read",
+            "L0",
+            false,
+            true,
+            "context",
+        ),
+        tool(
+            "build_community_reports",
+            "增量重建分层 GraphRAG 社区报告。",
+            empty.clone(),
             "read",
             "L0",
             false,
@@ -1184,6 +1308,56 @@ fn execute_read_tool(
     match step.tool_name.as_str() {
         "project_inventory" => project_inventory(conn, project_id),
         "search_fts" => search_tool(conn, project_id, &step.input, &run.goal),
+        "search_hybrid" => {
+            let query = step
+                .input
+                .get("query")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(&run.goal);
+            let limit = step
+                .input
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(20)
+                .clamp(1, 50) as usize;
+            Ok(serde_json::to_value(crate::retrieval::hybrid_search(
+                conn, project_id, query, limit, None, None,
+            )?)?)
+        }
+        "get_premise" => Ok(serde_json::to_value(crate::seed::active(
+            conn, project_id,
+        )?)?),
+        "get_blueprint" => {
+            let blueprint = match crate::blueprint::current(conn, project_id)? {
+                Some(view) => Some(view),
+                None => crate::blueprint::candidate(conn, project_id)?,
+            };
+            Ok(serde_json::to_value(blueprint)?)
+        }
+        "get_outline_plan" => Ok(serde_json::to_value(crate::outline::list(
+            conn, project_id,
+        )?)?),
+        "get_style_profiles" => Ok(serde_json::to_value(crate::style::list(conn, project_id)?)?),
+        "recommend_next_actions" => Ok(serde_json::to_value(next_actions(conn, project_id)?)?),
+        "rebuild_wiki" => {
+            // Rebuild remains a derived-view operation and never changes authoritative story facts.
+            // The read loop only has a shared connection, so defer rebuild requests to the explicit
+            // workflow action while still exposing its current status here.
+            let pages = crate::wiki::list(conn, project_id)?;
+            Ok(json!({
+                "pageCount": pages.len(),
+                "staleCount": pages.iter().filter(|page| page.stale_at.is_some()).count(),
+                "requiresExplicitAction": true
+            }))
+        }
+        "build_community_reports" => {
+            let reports = crate::graphrag::list_communities(conn, project_id)?;
+            Ok(json!({
+                "communityCount": reports.len(),
+                "requiresExplicitAction": reports.is_empty()
+            }))
+        }
         "foundation_check" => {
             serde_json::to_value(crate::foundation::evaluate(conn, project_id)?).map_err(Into::into)
         }
@@ -1988,6 +2162,184 @@ pub fn foundation_report(conn: &Connection, project_id: &str) -> AppResult<Found
     crate::foundation::evaluate(conn, project_id)
 }
 
+pub fn next_actions(conn: &Connection, project_id: &str) -> AppResult<Vec<AgentNextAction>> {
+    let mut actions = Vec::new();
+    let pending_candidates: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM candidate WHERE project_id=?1 AND status='pending'",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    if pending_candidates > 0 {
+        actions.push(AgentNextAction {
+            key: "review-pending".into(),
+            label: format!("先处理 {pending_candidates} 个待确认候选"),
+            description:
+                "候选和生成草稿尚未进入权威资料；先审批可以避免下一步基于未决定内容继续规划。"
+                    .into(),
+            prompt: "请帮我逐项解释当前待确认候选会怎样影响故事，并告诉我哪些应该先处理。".into(),
+            action: "review_candidates".into(),
+            priority: 0,
+        });
+    }
+
+    let premise = crate::seed::list(conn, project_id)?.into_iter().next();
+    let blueprint_current = crate::blueprint::current(conn, project_id)?;
+    let blueprint_candidate = crate::blueprint::candidate(conn, project_id)?;
+    let foundation = crate::foundation::evaluate(conn, project_id)?;
+    let has_skeleton: bool = conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM outline_node
+           WHERE project_id=?1 AND level='chapter' AND status!='dropped'
+         )",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    let confirmed_outline: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM outline_node
+         WHERE project_id=?1 AND level='chapter' AND status='confirmed'",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    let style_count: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM style_profile WHERE project_id=?1 AND status='confirmed'",
+        [project_id],
+        |row| row.get(0),
+    )?;
+    let (chapter_count, drafted_count): (i32, i32) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN current_revision_id IS NOT NULL THEN 1 ELSE 0 END),0)
+         FROM chapter WHERE project_id=?1",
+        [project_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
+    match &premise {
+        None => actions.push(AgentNextAction {
+            key: "shape-premise".into(),
+            label: "从一句话孵化故事方向".into(),
+            description: "先给 Agent 一个画面、人物困境或一句 logline，它会生成三套因果发动机不同的方向。".into(),
+            prompt: "我想先孵化故事。请先问我三个最关键的问题，再根据回答生成三套差异化的灵感方向。".into(),
+            action: "seed_generate".into(),
+            priority: 1,
+        }),
+        Some(premise) if premise.status != "confirmed" => actions.push(AgentNextAction {
+            key: "refine-premise".into(),
+            label: "继续微调当前灵感".into(),
+            description: "第一版灵感通常只是起点；继续对话补强主角欲望、阻力、代价和核心戏剧问题。".into(),
+            prompt: format!(
+                "请基于当前灵感继续深挖，不要直接确认。重点检查主角欲望、结构性阻力、不可逆代价和核心戏剧问题，并给我 3 个可选择的强化方向：{}",
+                premise.logline
+            ),
+            action: "chat".into(),
+            priority: 1,
+        }),
+        Some(_) if blueprint_current.is_none() => {
+            if blueprint_candidate.is_some() {
+                actions.push(AgentNextAction {
+                    key: "review-blueprint".into(),
+                    label: "审阅并完善叙事蓝本".into(),
+                    description: "叙事蓝本仍是候选。先检查核心戏剧问题、人物冲突、世界规则代价和因果链是否形成闭环。".into(),
+                    prompt: "请审阅当前叙事蓝本候选，指出最影响后续卷章的三处因果或人物动机问题，并给出修改建议。".into(),
+                    action: "chat".into(),
+                    priority: 1,
+                });
+            } else {
+                actions.push(AgentNextAction {
+                    key: "generate-blueprint".into(),
+                    label: "建立叙事蓝本与因果链".into(),
+                    description: "从已确认种子卡生成人物、势力、规则、时间线和可验证的逻辑链候选。".into(),
+                    prompt: "请为当前已确认种子卡建立叙事地基和主逻辑链，重点补齐主角与对手、关系张力、能力代价和核心戏剧问题。".into(),
+                    action: "blueprint_generate".into(),
+                    priority: 1,
+                });
+            }
+        }
+        Some(_) if !foundation.ready => actions.push(AgentNextAction {
+            key: "repair-foundation".into(),
+            label: format!("补齐 {} 项叙事地基", foundation.error_count),
+            description: "这些是卷章规划前的阻断项，补齐后再让 Agent 规划结构。".into(),
+            prompt: "请根据当前叙事地基检查结果，按影响程度列出必须先补的内容，并直接提出可确认的修订方案。".into(),
+            action: "chat".into(),
+            priority: 1,
+        }),
+        Some(_) if !has_skeleton => actions.push(AgentNextAction {
+            key: "generate-outline".into(),
+            label: "规划卷章骨架".into(),
+            description: "让已确认蓝本的逻辑节点映射为卷章候选；不会自动确认章节结构。".into(),
+            prompt: "请根据已确认叙事蓝本和因果链规划正式卷章骨架，优先保持逻辑节点闭环，不要套用固定十章。".into(),
+            action: "outline_generate".into(),
+            priority: 1,
+        }),
+        Some(_) if confirmed_outline == 0 => actions.push(AgentNextAction {
+            key: "review-outline".into(),
+            label: "审阅卷章候选".into(),
+            description: "卷章骨架仍是候选；确认后正文工坊才会按这些章节开始写作。".into(),
+            prompt: "请检查当前卷章候选是否完整承接逻辑链，指出节奏、因果断点和角色行动缺失，并给出修改建议。".into(),
+            action: "open_seed".into(),
+            priority: 1,
+        }),
+        Some(_) if style_count == 0 => actions.push(AgentNextAction {
+            key: "shape-style".into(),
+            label: "确定项目文笔方向".into(),
+            description: "根据故事气质选择文笔预设，并生成待确认的文笔档案候选。".into(),
+            prompt: "请根据当前故事的核心冲突、情绪基调和叙事视角，为我推荐一套具体可执行的文笔方案。".into(),
+            action: "style_proposal".into(),
+            priority: 1,
+        }),
+        Some(_) if chapter_count == 0 => actions.push(AgentNextAction {
+            key: "confirm-outline-first".into(),
+            label: "先确认至少一个章节".into(),
+            description: "正文需要已确认章节作为事务边界；先完成卷章确认，再开始写作。".into(),
+            prompt: "请帮我检查第一卷开头几章是否已经可以确认，并说明确认后第一场应该写什么。".into(),
+            action: "open_seed".into(),
+            priority: 1,
+        }),
+        Some(_) if drafted_count == 0 => actions.push(AgentNextAction {
+            key: "plan-first-chapter".into(),
+            label: "准备第一章开场".into(),
+            description: "让 Agent 从本章绑定的逻辑节点、人物目标和伏笔债务整理出可直接写作的场景任务。".into(),
+            prompt: "请为第一章准备开场方案：明确 POV、目标、冲突、转折、代价、要埋下的伏笔，以及不能提前泄露的信息。".into(),
+            action: "chat".into(),
+            priority: 1,
+        }),
+        Some(_) => actions.push(AgentNextAction {
+            key: "advance-next-chapter".into(),
+            label: "推进下一章".into(),
+            description: "根据当前正文进度、未结伏笔和逻辑链给出下一章的具体推进方案。".into(),
+            prompt: "请根据当前正文进度和逻辑链，告诉我下一章必须推进什么、不能提前解决什么，并给出三个可选开场冲突。".into(),
+            action: "chat".into(),
+            priority: 1,
+        }),
+    }
+
+    if !foundation.ready && actions.len() < 3 && blueprint_current.is_some() {
+        actions.push(AgentNextAction {
+            key: "foundation-risk".into(),
+            label: "检查叙事地基风险".into(),
+            description: format!(
+                "当前有 {} 项地基阻断问题；继续规划或写作前应先了解影响。",
+                foundation.error_count
+            ),
+            prompt: "请解释当前叙事地基阻断问题会怎样影响卷章或正文，并按优先级给出修复顺序。"
+                .into(),
+            action: "chat".into(),
+            priority: 2,
+        });
+    }
+    if actions.len() < 3 {
+        actions.push(AgentNextAction {
+            key: "next-step-review".into(),
+            label: "让 AI 判断下一步".into(),
+            description: "结合当前项目状态、待审内容和叙事债务，给出一个最具体的下一步。".into(),
+            prompt: "请判断我现在最应该做的一件事，并给出执行步骤、完成标准和不要提前做的事。"
+                .into(),
+            action: "chat".into(),
+            priority: 2,
+        });
+    }
+    actions.sort_by_key(|action| action.priority);
+    Ok(actions)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -2060,9 +2412,54 @@ mod tests {
                 && tool.requires_approval
                 && tool.output_target == "candidate"
         }));
+        assert!(registry.iter().any(|tool| {
+            tool.name == "generate_narrative_blueprint"
+                && tool.access == "write"
+                && tool.requires_approval
+                && tool.output_target == "candidate"
+        }));
+        assert!(registry
+            .iter()
+            .any(|tool| tool.name == "recommend_next_actions" && tool.access == "read"));
         assert!(!registry
             .iter()
             .any(|tool| tool.name.contains("accept") || tool.name.contains("confirm")));
+    }
+
+    #[test]
+    fn next_actions_follow_stage_and_pending_candidates() {
+        let (_dir, loaded) = project_fixture();
+        let pid = loaded.summary.id.clone();
+        let initial = next_actions(&loaded.conn, &pid).unwrap();
+        assert!(initial
+            .iter()
+            .any(|action| action.action == "seed_generate"));
+        crate::candidates::insert(
+            &loaded.conn,
+            &pid,
+            "style_profile",
+            json!({
+                "scope":"project",
+                "name":"待确认文笔",
+                "pov":"第三人称",
+                "person":"第三人称",
+                "tense":"过去时",
+                "syntax":{"avgSentenceMin":10,"avgSentenceMax":22,"shortRatio":45,"paragraphSentencesMin":3,"paragraphSentencesMax":5},
+                "lexicon":{"concreteRatio":60,"register":"冷峻","adverbDensityMax":5,"bannedWords":[]},
+                "imagery":{"sensoryChannels":["视觉"],"motifs":["雨"],"sensoryPer1000":8},
+                "rhetoric":{"metaphorPer1000":3,"irony":30,"minimalism":40},
+                "emotion":{"interiority":40,"externality":40,"intensityMin":2,"intensityMax":4},
+                "ratios":{"action":40,"dialogue":30,"description":20,"interiority":10},
+                "antiStyle":[]
+            }),
+            Some("agent:test"),
+            None,
+            0.7,
+        )
+        .unwrap();
+        let actions = next_actions(&loaded.conn, &pid).unwrap();
+        assert_eq!(actions[0].action, "review_candidates");
+        assert!(actions[0].label.contains('1'));
     }
 
     #[test]

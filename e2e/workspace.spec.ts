@@ -552,6 +552,41 @@ async function installMock(page: import("@playwright/test").Page) {
                   },
                 ],
               };
+            case "agent_next_actions":
+              return [
+                {
+                  key: "refine-premise",
+                  label: "继续微调当前灵感",
+                  description: "第一版灵感只是起点，继续补强主角欲望、阻力和代价。",
+                  prompt: "请继续微调当前灵感，并给出三个强化方向。",
+                  action: "chat",
+                  priority: 1,
+                },
+                {
+                  key: "generate-blueprint",
+                  label: "建立叙事蓝本",
+                  description: "生成人物、势力、规则、时间线和因果链候选。",
+                  prompt: "请根据当前种子卡建立叙事蓝本。",
+                  action: "blueprint_generate",
+                  priority: 2,
+                },
+              ];
+            case "chat_append_user":
+            case "chat_append_assistant":
+              return {
+                id: `workflow-${Date.now()}`,
+                sessionId: "s1",
+                seq: 9,
+                role: args?.content ? "assistant" : "user",
+                content: args?.content ?? "",
+                model: "agent-workflow",
+                tokens: 0,
+                createdAt: "2026-10-20T08:03:00Z",
+                linkedCandidateIds: [],
+                pinned: false,
+              };
+            case "outline_generate":
+              return [];
             case "embedding_status":
               return {
                 configured: true,
@@ -1176,7 +1211,21 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.screenshot({ path: path.join("test-results", "seed.png") });
 
   await page.getByRole("button", { name: /^Agent/ }).click();
-  await expect(page.getByText("Agent 项目工作台")).toBeVisible();
+  await expect(page.getByText("Agent 协作工作流")).toBeVisible();
+  await expect(page.getByText("下一步").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "灵感方向", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "叙事蓝本", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "卷章骨架", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "文笔方案", exact: true })).toBeVisible();
+  await page
+    .getByPlaceholder("继续讨论，或让 AI 推演下一场…（Enter 发送，Shift+Enter 换行）")
+    .fill("帮我生成卷章骨架");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByText(/卷章骨架候选已生成/)).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join("test-results", "agent-chat.png") });
+
+  await page.getByRole("button", { name: "执行记录", exact: true }).click();
   await expect(page.getByText("计划与执行轨迹")).toBeVisible();
   await expect(page.getByText("守夜人", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "暂停" }).click();
@@ -1198,7 +1247,7 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByTitle("确认候选").first().click();
   await expect(page.getByText("候选已确认并写入权威资料")).toBeVisible();
 
-  await page.getByRole("button", { name: "自由讨论" }).click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText("建议把第一场放在守夜之后")).toBeVisible();
   await page.screenshot({ path: path.join("test-results", "chat.png") });
 
@@ -1289,7 +1338,7 @@ test("agent workbench fits both desktop review sizes", async ({ page }) => {
   await installMock(page);
   await page.goto("/");
   await page.getByRole("button", { name: /^Agent/ }).click();
-  await expect(page.getByText("Agent 项目工作台")).toBeVisible();
+  await expect(page.getByText("Agent 协作工作流")).toBeVisible();
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(200);
