@@ -13,8 +13,9 @@ import {
   Sparkles,
   Waypoints,
 } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 import type { ProjectSnapshot } from "@/lib/ipc";
-import { ipc, type BranchRecord } from "@/lib/ipc";
+import { ipc, isTauri, type BranchRecord } from "@/lib/ipc";
 import { useAppStore, type NavKey, type WorkspaceMode } from "@/stores/ui";
 
 type NavItem = {
@@ -112,27 +113,27 @@ export function AppShell({
   };
 
   const activeLabel = navItems.find((item) => item.key === nav)?.label ?? "概览";
+  const hasTrafficLights = isTauri() && /Mac/i.test(navigator.userAgent);
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="flex w-[216px] shrink-0 flex-col border-r border-line bg-paper/60">
-        <div className="window-drag flex h-[54px] items-center pl-[76px] pr-4">
+      <aside className="sidebar-surface relative flex w-[216px] shrink-0 flex-col overflow-hidden border-r border-line">
+        <div className="leaf-sprig" aria-hidden />
+        {/* macOS 桌面端把红绿灯放在独立的拖拽条里，品牌与导航左对齐，不再被红绿灯挤到右侧。 */}
+        {hasTrafficLights ? <div className="window-drag h-[30px] shrink-0" /> : null}
+        <div
+          className={`window-drag flex shrink-0 items-center px-5 ${hasTrafficLights ? "h-[44px]" : "h-[54px]"}`}
+        >
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-                <path d="M7 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="#F3EFE6" strokeWidth="1.8" strokeLinecap="round" />
-                <path d="M17 7.5c0 2.5-2 4.5-4.5 4.5S8 10 8 7.5" stroke="#D9A441" strokeWidth="1.5" strokeLinecap="round" />
-                <circle cx="12" cy="12" r="1.6" fill="#E2725B" />
-              </svg>
-            </div>
+            <BrandMark size={30} />
             <div>
-              <div className="text-[13px] font-semibold tracking-wide leading-none text-ink">CanonWeave</div>
-              <div className="mt-1 text-[9px] tracking-[0.22em] text-muted">叙事织网</div>
+              <div className="text-[13.5px] font-semibold leading-none tracking-wide text-ink">CanonWeave</div>
+              <div className="mt-1 text-[9.5px] tracking-[0.24em] text-muted">叙事织网</div>
             </div>
           </div>
         </div>
 
-        <nav className="mt-2 flex-1 overflow-y-auto px-3 pb-2">
+        <nav className="relative mt-2 flex-1 overflow-y-auto px-3 pb-2">
           {navGroups.map((group, groupIndex) => (
             <div key={group.label ?? `group-${groupIndex}`} className={groupIndex ? "mt-4" : ""}>
               {group.label ? (
@@ -150,8 +151,8 @@ export function AppShell({
                       onClick={() => go(item.key)}
                       className={`focus-ring group flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left transition ${
                         active
-                          ? "bg-teal text-paper-raised"
-                          : "text-ink-soft hover:bg-ink/5"
+                          ? "bg-teal text-paper-raised shadow-[0_1px_3px_rgba(31,68,48,0.25)]"
+                          : "text-ink-soft hover:bg-teal-soft/70 hover:text-teal-deep"
                       }`}
                     >
                       <Icon
@@ -178,7 +179,7 @@ export function AppShell({
           ))}
         </nav>
 
-        <div className="border-t border-line px-3 py-3">
+        <div className="relative border-t border-line bg-sidebar/70 px-3 py-3">
           <button
             onClick={onClose}
             className="group w-full rounded-lg px-3 py-2 text-left transition hover:bg-ink/5"
@@ -194,7 +195,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="window-drag flex h-[54px] shrink-0 items-center justify-between border-b border-line bg-paper/50 px-5">
+        <header className="window-drag silk-edge z-10 flex h-[54px] shrink-0 items-center justify-between bg-paper/40 px-5">
           <div className="no-drag flex items-center gap-4">
             <div className="flex items-center gap-2 text-[11px]">
               <span className="font-medium text-ink">{project.project.name}</span>

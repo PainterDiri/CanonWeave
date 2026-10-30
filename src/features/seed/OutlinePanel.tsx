@@ -610,6 +610,16 @@ function OutlineRow({
             </div>
           ))}
         </div>
+        {node.level === "chapter" ? (
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-dashed border-line pt-2 text-[10px] leading-5">
+            <span className={node.valueShift ? "text-teal-deep" : "text-amber"}>
+              价值转变 · {node.valueShift || "未写"}
+            </span>
+            <span className={`min-w-0 truncate ${node.hook ? "text-ink-soft" : "text-muted"}`}>
+              钩子 · {node.hook || "未写"}
+            </span>
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -673,6 +683,10 @@ function OutlineEditor({
   const [conflict, setConflict] = useState("");
   const [turn, setTurn] = useState("");
   const [payoff, setPayoff] = useState("");
+  const [valueShift, setValueShift] = useState("");
+  const [crisis, setCrisis] = useState("");
+  const [hook, setHook] = useState("");
+  const [reveal, setReveal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -683,6 +697,10 @@ function OutlineEditor({
       setConflict(node.conflict);
       setTurn(node.turn);
       setPayoff(node.payoff);
+      setValueShift(node.valueShift);
+      setCrisis(node.crisis);
+      setHook(node.hook);
+      setReveal(node.reveal);
       setError(null);
     }
   }, [node]);
@@ -691,7 +709,18 @@ function OutlineEditor({
     if (!node) return;
     setBusy(true);
     try {
-      await ipc.outlineUpdate({ id: node.id, title, goal, conflict, turn, payoff });
+      await ipc.outlineUpdate({
+        id: node.id,
+        title,
+        goal,
+        conflict,
+        turn,
+        payoff,
+        valueShift,
+        crisis,
+        hook,
+        reveal,
+      });
       await onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -739,6 +768,25 @@ function OutlineEditor({
         <Field label="伏笔" hint="回收或新增哪条伏笔">
           <Textarea rows={2} value={payoff} onChange={(event) => setPayoff(event.target.value)} />
         </Field>
+        {!isVolume ? (
+          <div className="rounded-xl border border-silk/60 bg-teal-soft/25 p-3">
+            <div className="mb-2 text-[12px] font-medium text-teal-deep">章节工艺卡</div>
+            <div className="space-y-3">
+              <Field label="价值转变" hint="用 + / - 标出章首与章末，如 +信任 → -猜疑">
+                <Input value={valueShift} onChange={(event) => setValueShift(event.target.value)} />
+              </Field>
+              <Field label="危机抉择" hint="两个选项都要付出代价">
+                <Textarea rows={2} value={crisis} onChange={(event) => setCrisis(event.target.value)} />
+              </Field>
+              <Field label="章末钩子" hint="读者翻页的具体理由">
+                <Textarea rows={2} value={hook} onChange={(event) => setHook(event.target.value)} />
+              </Field>
+              <Field label="读者揭示" hint="读者新知道、而角色未必知道的信息">
+                <Textarea rows={2} value={reveal} onChange={(event) => setReveal(event.target.value)} />
+              </Field>
+            </div>
+          </div>
+        ) : null}
         {error ? <div className="text-[11px] text-coral">{error}</div> : null}
       </div>
     </Modal>

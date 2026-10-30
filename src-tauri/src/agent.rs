@@ -476,7 +476,7 @@ pub fn detail(conn: &Connection, project_id: &str, id: &str) -> AppResult<AgentR
 
 pub fn list(conn: &Connection, project_id: &str, limit: usize) -> AppResult<Vec<AgentRun>> {
     let mut stmt = conn.prepare(&format!(
-        "{RUN_SELECT} WHERE r.project_id=?1
+        "{RUN_SELECT} WHERE r.project_id=?1 AND r.mode != 'harness'
          ORDER BY CASE r.status
            WHEN 'running' THEN 0 WHEN 'planning' THEN 1 WHEN 'waiting_approval' THEN 2
            WHEN 'paused' THEN 3 WHEN 'failed' THEN 4 ELSE 5 END,
@@ -1689,7 +1689,7 @@ fn allowed_kinds(output: &str) -> Vec<&'static str> {
     }
 }
 
-fn proposal_title(kind: &str, payload: &Value) -> String {
+pub(crate) fn proposal_title(kind: &str, payload: &Value) -> String {
     let field = match kind {
         "entity" => "canonicalName",
         "relation" => "type",
@@ -1705,7 +1705,7 @@ fn proposal_title(kind: &str, payload: &Value) -> String {
         .to_string()
 }
 
-fn validate_proposal(kind: &str, payload: &Value) -> Result<(), String> {
+pub(crate) fn validate_proposal(kind: &str, payload: &Value) -> Result<(), String> {
     match kind {
         "entity" => {
             for field in ["canonicalName", "type"] {
@@ -1802,7 +1802,7 @@ fn validate_proposal(kind: &str, payload: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn duplicate_proposal(
+pub(crate) fn duplicate_proposal(
     conn: &Connection,
     project_id: &str,
     kind: &str,

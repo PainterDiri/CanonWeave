@@ -1,21 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: #f3efe6;
-  --color-paper-raised: #fbf8f1;
-  --color-paper-deep: #e9e2d4;
-  --color-ink: #23241f;
-  --color-ink-soft: #55564f;
-  --color-muted: #767368;
-  --color-line: #ded7c8;
-  --color-line-strong: #c9c0ae;
-  --color-teal: #114b45;
-  --color-teal-deep: #0b3531;
-  --color-teal-soft: #dcebe6;
-  --color-coral: #d9604a;
-  --color-coral-soft: #f6e2dc;
-  --color-amber: #b8862e;
-  --color-amber-soft: #f4ead2;
+  /* 纸面：带细纤维的米白棉纸 */
+  --color-paper: #f2efdf;
+  --color-paper-raised: #fbfaf3;
+  --color-paper-deep: #e8e4d2;
+  --color-ink: #20271f;
+  --color-ink-soft: #4a5546;
+  --color-muted: #5f6a5a;
+  --color-line: #dad8c5;
+  --color-line-strong: #c3c3aa;
+  /* 叶绿：主操作色（沿用 teal 令牌名，避免全仓类名改动） */
+  --color-teal: #2f5e3f;
+  --color-teal-deep: #1f4430;
+  --color-teal-soft: #e0ecd9;
+  /* 丝线：浅绿，只用于连接、分隔与进度 */
+  --color-silk: #9cc79a;
+  --color-silk-soft: #d6eacd;
+  --color-coral: #a9452a;
+  --color-coral-soft: #f6e3da;
+  --color-amber: #8a5c0c;
+  --color-amber-soft: #f3ead0;
+  --color-sidebar: #ebecdc;
   --font-display: "Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
   --font-body: "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", system-ui, sans-serif;
 }
@@ -42,10 +48,13 @@ body,
 
 body {
   overflow: hidden;
-  background:
-    radial-gradient(circle at 12% -10%, rgba(255, 255, 255, 0.85), transparent 38%),
-    radial-gradient(circle at 92% 108%, rgba(17, 75, 69, 0.06), transparent 45%),
-    var(--color-paper);
+  caret-color: var(--color-teal);
+  background-color: var(--color-paper);
+  background-image:
+    radial-gradient(circle at 8% -12%, rgba(255, 255, 255, 0.55), transparent 40%),
+    radial-gradient(circle at 96% 110%, rgba(47, 94, 63, 0.08), transparent 46%),
+    url("./assets/paper-fiber.jpg");
+  background-size: auto, auto, 720px 720px;
 }
 
 @layer base {
@@ -66,7 +75,7 @@ button:disabled {
 }
 
 ::selection {
-  background: rgba(17, 75, 69, 0.16);
+  background: rgba(156, 199, 154, 0.42);
 }
 
 ::-webkit-scrollbar {
@@ -75,7 +84,7 @@ button:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(110, 105, 92, 0.24);
+  background: rgba(74, 99, 70, 0.22);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: padding-box;
@@ -86,15 +95,126 @@ button:disabled {
 }
 
 .paper-card {
-  background: color-mix(in srgb, var(--color-paper-raised) 92%, transparent);
+  background: color-mix(in srgb, var(--color-paper-raised) 90%, transparent);
   border: 1px solid var(--color-line);
   border-radius: 14px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset, 0 8px 24px rgba(61, 50, 35, 0.04);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
 }
 
-.hairline {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-line) 12%, var(--color-line) 88%, transparent);
+/* 丝线分隔：一根轻微起伏的浅绿细线，而不是灰色发丝线 */
+.hairline,
+.silk-rule {
+  height: 6px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='6' viewBox='0 0 120 6'%3E%3Cpath d='M0 3 C 20 0.6, 40 0.6, 60 3 S 100 5.4, 120 3' fill='none' stroke='%239cc79a' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E")
+    repeat-x center / 120px 6px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+}
+
+/* 顶栏下沿的丝线 */
+.silk-edge {
+  position: relative;
+}
+.silk-edge::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 6px;
+  pointer-events: none;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='6' viewBox='0 0 240 6'%3E%3Cpath d='M0 3 C 40 0.8, 80 0.8, 120 3 S 200 5.2, 240 3' fill='none' stroke='%239cc79a' stroke-opacity='0.85' stroke-width='1'/%3E%3C/svg%3E")
+    repeat-x center / 240px 6px;
+}
+
+/* 纸面卡片：半透明纸色叠在纤维纹理上，保留纸纹；角落各一段细藤。 */
+.paper-card,
+.deco-card {
+  position: relative;
+  isolation: isolate;
+}
+.paper-card {
+  background-color: transparent;
+  background-image:
+    linear-gradient(rgba(252, 251, 245, 0.8), rgba(252, 251, 245, 0.8)),
+    url("./assets/paper-fiber.jpg");
+  background-size: auto, 720px 720px;
+}
+.paper-card::before,
+.paper-card::after,
+.deco-card::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 150px;
+  height: 96px;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='96' viewBox='0 0 150 96' fill='none'%3E%3Cg stroke='%2386b783' stroke-linecap='round'%3E%3Cpath d='M5 94 C 5 60 4 30 9 17 C 14 6 28 4 52 5 C 80 6 108 3 148 5' stroke-width='1.1'/%3E%3Cpath d='M52 5 c 3 -1 6 2 4 5 c -2 3 -6 1 -5 -2' stroke-width='.8'/%3E%3Cpath d='M7 52 c -2 -4 1 -8 4 -6 c 2 2 -1 5 -3 3' stroke-width='.8'/%3E%3C/g%3E%3Cg fill='%23c3dfbc' stroke='%2386b783' stroke-width='.6'%3E%3Cpath d='M9 17 C 16 13 24 14 27 19 C 20 23 13 22 9 17 Z'/%3E%3Cpath d='M30 5 C 34 -1 42 -1 45 3 C 40 8 33 8 30 5 Z' transform='translate(0 3)'/%3E%3Cpath d='M78 6 C 84 10 92 10 95 6 C 90 2 83 2 78 6 Z'/%3E%3Cpath d='M6 34 C 1 39 1 46 4 49 C 9 45 9 38 6 34 Z'/%3E%3Cpath d='M112 4 C 117 0 123 1 125 4 C 121 8 115 8 112 4 Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat 0 0 / contain;
+  opacity: 0.85;
+}
+.paper-card::before,
+.deco-card::before {
+  top: 1px;
+  left: 1px;
+}
+.paper-card::after {
+  right: 1px;
+  bottom: 1px;
+  transform: rotate(180deg);
+  opacity: 0.6;
+}
+.deco-card::before {
+  width: 96px;
+  height: 62px;
+  opacity: 0.7;
+}
+
+/* 选中页签：一根丝线，末端系一片小叶 */
+.tab-thread {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-teal);
+}
+.tab-thread::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  top: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 1px 9px;
+  background: var(--color-silk);
+  transform: rotate(-30deg);
+}
+
+.sidebar-surface {
+  background-image:
+    linear-gradient(rgba(235, 236, 220, 0.78), rgba(235, 236, 220, 0.78)),
+    url("./assets/paper-fiber.jpg");
+  background-size: auto, 720px 720px;
+}
+
+/* 侧栏底部的叶枝插画：真实水彩素材，低透明度，不拦截点击 */
+.leaf-sprig {
+  position: absolute;
+  right: -34px;
+  bottom: 54px;
+  width: 168px;
+  height: 252px;
+  background: url("./assets/leaf-sprig.png") no-repeat center / contain;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.leaf-avatar {
+  background: var(--color-teal);
+  box-shadow: 0 1px 3px rgba(31, 68, 48, 0.25);
 }
 
 .display {
@@ -122,9 +242,36 @@ button:disabled {
   border-top: 1px dashed var(--color-line-strong);
 }
 
-.focus-ring:focus-visible {
-  outline: 2px solid rgba(17, 75, 69, 0.55);
+.focus-ring:focus-visible,
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(47, 94, 63, 0.55);
   outline-offset: 2px;
+}
+
+/* 流水线丝线：竖向连接阶段节点，完成部分为叶绿，未完成为浅丝线 */
+.pipeline-thread {
+  position: absolute;
+  left: 15px;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--color-teal) 0%,
+    var(--color-teal) var(--done, 0%),
+    var(--color-silk) var(--done, 0%),
+    var(--color-silk-soft) 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    animation: none;
+  }
 }
 
 .no-drag {
@@ -133,4 +280,143 @@ button:disabled {
 
 .window-drag {
   -webkit-app-region: drag;
+}
+
+/* Markdown：Agent 回答与资料长文本 */
+.md {
+  font-size: inherit;
+  line-height: 1.75;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 0.6em;
+}
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 0.9em 0 0.35em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.08em;
+  color: var(--color-ink);
+}
+.md ul,
+.md ol {
+  margin: 0.2em 0 0.7em;
+  padding-left: 1.35em;
+}
+.md ul {
+  list-style: none;
+}
+.md ul > li {
+  position: relative;
+}
+.md ul > li::before {
+  content: "";
+  position: absolute;
+  left: -0.95em;
+  top: 0.72em;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px 6px;
+  transform: rotate(45deg);
+  background: var(--color-silk);
+}
+.md ol {
+  list-style: decimal;
+}
+.md ol > li::marker {
+  color: var(--color-teal);
+  font-variant-numeric: tabular-nums;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md strong {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.md em {
+  font-style: normal;
+  background: linear-gradient(transparent 62%, rgba(156, 199, 154, 0.38) 62%);
+}
+.md blockquote {
+  margin: 0.6em 0;
+  padding: 0.35em 0.9em;
+  border-radius: 8px;
+  background: rgba(224, 236, 217, 0.5);
+  color: var(--color-ink-soft);
+}
+.md code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  padding: 0.05em 0.35em;
+  border-radius: 4px;
+  background: rgba(47, 94, 63, 0.08);
+  color: var(--color-teal-deep);
+}
+.md pre {
+  margin: 0.6em 0;
+  padding: 0.7em 0.9em;
+  border-radius: 8px;
+  background: rgba(32, 39, 31, 0.05);
+  overflow-x: auto;
+}
+.md pre code {
+  padding: 0;
+  background: none;
+}
+.md hr {
+  height: 6px;
+  margin: 0.8em 0;
+  border: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='6' viewBox='0 0 120 6'%3E%3Cpath d='M0 3 C 20 0.6, 40 0.6, 60 3 S 100 5.4, 120 3' fill='none' stroke='%239cc79a' stroke-width='1'/%3E%3C/svg%3E")
+    repeat-x center / 120px 6px;
+}
+.md table {
+  width: 100%;
+  margin: 0.6em 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.md th,
+.md td {
+  padding: 0.3em 0.55em;
+  border-bottom: 1px solid var(--color-line);
+  text-align: left;
+}
+.md th {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.md .md-link {
+  color: var(--color-teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--color-silk);
+}
+
+/* 工作区页面：铺满主区域高度，面板随窗口伸展，而不是固定像素高度。 */
+.workspace-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1920px;
+  height: 100%;
+  min-height: 640px;
+  margin: 0 auto;
+}
+.workspace-page > .workspace-fill,
+.workspace-fill {
+  flex: 1 1 auto;
+  min-height: 0;
 }

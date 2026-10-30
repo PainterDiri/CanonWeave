@@ -112,6 +112,10 @@ const kindLabels: Record<string, string> = {
   rule: "规则",
   scene_goal: "章节目标",
   style_profile: "文笔档案",
+  craft_patch: "章节工艺卡",
+  story_thread: "叙事线程",
+  project_guide: "作者守则",
+  draft: "正文草稿",
 };
 
 function statusBadge(status: string) {
@@ -415,7 +419,7 @@ export function AgentPage() {
   }
 
   return (
-    <div className="fade-in mx-auto max-w-[1440px] px-5 py-5">
+    <div className="fade-in workspace-page px-6 py-5">
       <SectionTitle
         title="Agent 协作工作流"
         action={
@@ -456,8 +460,8 @@ export function AgentPage() {
           onWorkflowComplete={refreshWorkflow}
         />
       ) : (
-        <div className="grid grid-cols-[220px_minmax(0,1fr)_286px] gap-3">
-          <aside className="paper-card flex h-[calc(100vh-156px)] min-h-[560px] flex-col overflow-hidden">
+        <div className="workspace-fill grid grid-cols-[240px_minmax(0,1fr)_320px] gap-3">
+          <aside className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-line px-3.5 py-3">
               <div>
                 <div className="text-[11.5px] font-semibold text-ink">Run 历史</div>
@@ -531,7 +535,7 @@ export function AgentPage() {
             </div>
           </aside>
 
-          <main className="flex h-[calc(100vh-156px)] min-h-[560px] min-w-0 flex-col gap-3 overflow-hidden">
+          <main className="flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden">
             <section className="paper-card shrink-0 overflow-hidden">
               <div className="border-b border-line px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
@@ -843,7 +847,7 @@ export function AgentPage() {
             </section>
           </main>
 
-          <aside className="flex h-[calc(100vh-156px)] min-h-[560px] flex-col gap-3 overflow-hidden">
+          <aside className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
             <section className="paper-card shrink-0 overflow-hidden">
               <div className="flex items-center justify-between border-b border-line px-3.5 py-3">
                 <div>

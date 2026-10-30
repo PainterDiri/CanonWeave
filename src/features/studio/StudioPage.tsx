@@ -409,7 +409,7 @@ export function StudioPage() {
   }
 
   return (
-    <div className="fade-in mx-auto max-w-[1280px] px-6 py-6">
+    <div className="fade-in workspace-page px-6 py-6">
       <SectionTitle
         eyebrow="Studio"
         title="正文工坊"
@@ -433,8 +433,8 @@ export function StudioPage() {
           {error}
         </div>
       ) : null}
-      <div className="grid grid-cols-[260px_minmax(0,1fr)] gap-4">
-        <aside className="paper-card flex h-[680px] min-h-0 flex-col overflow-hidden">
+      <div className="workspace-fill grid grid-cols-[260px_minmax(0,1fr)] gap-4">
+        <aside className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
           <div className="border-b border-line px-3.5 py-2.5 text-[11px] font-semibold text-ink-soft">
             章节
           </div>
@@ -502,8 +502,8 @@ export function StudioPage() {
           </div>
         </aside>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-4">
-          <section className="paper-card flex h-[680px] min-h-0 flex-col overflow-hidden">
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_300px] gap-4">
+          <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-line px-5 py-3">
               <div className="flex items-center gap-4">
                 <div className="flex rounded-full border border-line p-0.5">
@@ -707,7 +707,7 @@ export function StudioPage() {
             )}
           </section>
 
-          <aside className="flex h-[680px] min-h-0 flex-col gap-3">
+          <aside className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto">
             <section className="paper-card p-3.5">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[10.5px] font-semibold text-ink-soft">上下文预检</span>
@@ -770,7 +770,9 @@ export function StudioPage() {
                       <div className="text-[9px] text-muted">
                         {draft.payload.source === "chat_continue"
                           ? "对话续写"
-                          : refined
+                          : draft.payload.source === "agent"
+                            ? `Agent 起草 · 第 ${draft.payload.chapterNumber ?? "?"} 章${draft.payload.mode === "append" ? "续写" : "整章"}`
+                            : refined
                             ? "精修草稿"
                             : "章节生成"}{" "}
                         ·{" "}

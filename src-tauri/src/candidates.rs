@@ -384,9 +384,42 @@ pub fn accept(
                 ],
             )?;
             if entity_type == "character" {
+                let core = |key: &str| {
+                    payload
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string()
+                };
+                // values / taboo 在库中是 JSON 数组；模型可能给数组，也可能给顿号分隔的字符串。
+                let list = |key: &str| match payload.get(key) {
+                    Some(Value::Array(items)) => Value::Array(items.clone()).to_string(),
+                    Some(Value::String(text)) => Value::Array(
+                        text.split(['、', '，', ',', '；', ';'])
+                            .map(str::trim)
+                            .filter(|item| !item.is_empty())
+                            .map(|item| Value::String(item.to_string()))
+                            .collect(),
+                    )
+                    .to_string(),
+                    _ => "[]".to_string(),
+                };
                 tx.execute(
-                    "INSERT INTO character_core (entity_id, updated_at) VALUES (?1, ?2)",
-                    params![id, ts],
+                    "INSERT INTO character_core
+                     (entity_id, desire, need, fear, flaw, \"values\", secret, taboo, updated_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    params![
+                        id,
+                        core("desire"),
+                        core("need"),
+                        core("fear"),
+                        core("flaw"),
+                        list("values"),
+                        core("secret"),
+                        list("taboo"),
+                        ts
+                    ],
                 )?;
             }
             id
@@ -464,6 +497,24 @@ pub fn accept(
             if title.trim().is_empty() {
                 return Err(AppError::Message("事件候选缺少标题".into()));
             }
+            let place_id: Option<String> = match payload.get("placeId").and_then(Value::as_str) {
+                Some(id) => Some(id.to_string()),
+                None => match payload.get("place").and_then(Value::as_str) {
+                    Some(name) if !name.trim().is_empty() => find_entity(&tx, project_id, name)?,
+                    _ => None,
+                },
+            };
+            let participants = match payload.get("participants") {
+                Some(Value::Array(items)) => Value::Array(items.clone()),
+                Some(Value::String(text)) => Value::Array(
+                    text.split(['、', '，', ','])
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(|item| Value::String(item.into()))
+                        .collect(),
+                ),
+                _ => json!([]),
+            };
             tx.execute(
                 "INSERT INTO event (id, project_id, title, participants, place_id, story_time,
                     reveal_time, cause, outcome, source_span, status, created_at, branch_id)
@@ -472,17 +523,18 @@ pub fn accept(
                     id,
                     project_id,
                     title,
-                    payload
-                        .get("participants")
-                        .cloned()
-                        .unwrap_or(json!([]))
-                        .to_string(),
-                    payload.get("placeId").and_then(Value::as_str),
+                    participants.to_string(),
+                    place_id,
                     payload
                         .get("storyTime")
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
-                    payload.get("revealTime").and_then(Value::as_str),
+                    // reveal_time 非空；Agent 与蓝本常用 revealAt 表示读者何时得知。
+                    payload
+                        .get("revealTime")
+                        .or_else(|| payload.get("revealAt"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
                     payload
                         .get("cause")
                         .and_then(Value::as_str)
@@ -724,6 +776,75 @@ pub fn accept(
                 ],
             )?;
             id
+        }
+        "craft_patch" => {
+            let node_id = payload
+                .get("outlineNodeId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Message("工艺卡修订缺少章节节点".into()))?;
+            let node = crate::outline::get(&tx, project_id, node_id)?;
+            if let Some(base) = payload.get("baseUpdatedAt").and_then(Value::as_str) {
+                if base != node.updated_at {
+                    return Err(AppError::Message(
+                        "该章节骨架在候选生成后已被修改，请让 Agent 基于最新内容重新提出".into(),
+                    ));
+                }
+            }
+            let changes = payload.get("changes").cloned().unwrap_or_else(|| json!({}));
+            let pick = |key: &str, current: &str| {
+                changes
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| current.to_string())
+            };
+            tx.execute(
+                "UPDATE outline_node SET value_shift=?3, crisis=?4, hook=?5, reveal=?6,
+                    goal=?7, conflict=?8, turn=?9, payoff=?10, updated_at=?11
+                 WHERE project_id=?1 AND id=?2",
+                params![
+                    project_id,
+                    node_id,
+                    pick("valueShift", &node.value_shift),
+                    pick("crisis", &node.crisis),
+                    pick("hook", &node.hook),
+                    pick("reveal", &node.reveal),
+                    pick("goal", &node.goal),
+                    pick("conflict", &node.conflict),
+                    pick("turn", &node.turn),
+                    pick("payoff", &node.payoff),
+                    ts
+                ],
+            )?;
+            node_id.to_string()
+        }
+        "knowledge_domain" => {
+            let input: crate::domain::KnowledgeDomainInput =
+                serde_json::from_value(payload.clone())
+                    .map_err(|e| AppError::Message(format!("知识域候选格式无效：{e}")))?;
+            crate::knowledge::create_domain(&tx, project_id, &input)?.id
+        }
+        "story_thread" => {
+            let mut input: crate::domain::StoryThreadInput =
+                serde_json::from_value(payload.clone())
+                    .map_err(|e| AppError::Message(format!("线程候选格式无效：{e}")))?;
+            input.id = None;
+            crate::craft::save_thread(&tx, project_id, &input)?.id
+        }
+        "project_guide" => {
+            let current = crate::craft::guide(&tx, project_id)?;
+            let base = payload.get("baseUpdatedAt").and_then(Value::as_str);
+            if base != current.updated_at.as_deref() {
+                return Err(AppError::Message(
+                    "作者守则在候选生成后已被修改，请重新提出修订".into(),
+                ));
+            }
+            let content = payload
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            crate::craft::save_guide(&tx, project_id, content)?;
+            project_id.to_string()
         }
         "wiki_edit" => crate::wiki::apply_confirmed_edit(&tx, project_id, &candidate)?,
         other => {

@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
@@ -164,7 +165,7 @@ export function WikiPageView() {
   ];
 
   return (
-    <div className="fade-in mx-auto max-w-[1220px] px-8 py-7">
+    <div className="fade-in workspace-page px-8 py-7">
       <SectionTitle
         eyebrow="Narrative Wiki Compiler"
         title="叙事百科"
@@ -235,8 +236,8 @@ export function WikiPageView() {
           }
         />
       ) : (
-        <div className="grid grid-cols-[290px_minmax(0,1fr)] gap-4">
-          <aside className="paper-card flex h-[650px] min-h-0 flex-col overflow-hidden">
+        <div className="workspace-fill grid grid-cols-[300px_minmax(0,1fr)] gap-4">
+          <aside className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
             <div className="border-b border-line px-4 py-3 text-[11px] font-semibold text-ink-soft">
               编译页面 {filtered.length}
             </div>
@@ -267,7 +268,7 @@ export function WikiPageView() {
           </aside>
 
           {current ? (
-            <section className="paper-card flex h-[650px] min-h-0 flex-col overflow-hidden">
+            <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
               <div className="flex items-start justify-between border-b border-line px-6 py-4">
                 <div>
                   <div className="flex items-center gap-2">
@@ -320,9 +321,7 @@ export function WikiPageView() {
                     ))}
                   </div>
                 ) : null}
-                <pre className="whitespace-pre-wrap font-display text-[12px] leading-7 text-ink-soft">
-                  {current.content}
-                </pre>
+                <Markdown className="text-[12.5px] leading-7 text-ink-soft">{current.content}</Markdown>
                 <div className="mt-6 border-t border-line pt-4">
                   <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold text-ink-soft">
                     <BookOpen size={12} className="text-teal" /> 来源

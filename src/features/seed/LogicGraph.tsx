@@ -67,7 +67,7 @@ export function LogicGraph({
               markerHeight="7"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a806f" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8fa486" />
             </marker>
             <marker
               id="logic-edge-arrow-selected"
@@ -78,7 +78,7 @@ export function LogicGraph({
               markerHeight="7"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#d9604a" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a9452a" />
             </marker>
           </defs>
           {edges.map((edge) => {
@@ -113,7 +113,7 @@ export function LogicGraph({
                 <path
                   d={path}
                   fill="none"
-                  stroke={selected ? "#d9604a" : "#8a806f"}
+                  stroke={selected ? "#a9452a" : "#8fa486"}
                   strokeWidth={selected ? 2 : 1.3}
                   markerEnd={
                     selected
@@ -126,10 +126,10 @@ export function LogicGraph({
                   x={midX}
                   y={midY}
                   textAnchor="middle"
-                  fill={selected ? "#d9604a" : "#6f6a60"}
+                  fill={selected ? "#a9452a" : "#4a5546"}
                   fontSize={9}
                   paintOrder="stroke"
-                  stroke="#f7f3ea"
+                  stroke="#fbfaf3"
                   strokeWidth={3}
                 >
                   {edge.relation || "因果"}

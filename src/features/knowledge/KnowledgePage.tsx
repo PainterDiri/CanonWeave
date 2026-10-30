@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
@@ -8,6 +9,8 @@ import {
   Pencil,
   Plus,
   Sparkles,
+  Flag,
+  Zap,
 } from "lucide-react";
 import {
   Badge,
@@ -41,6 +44,8 @@ const domainIcons: Record<string, typeof BookOpen> = {
   landmark: Landmark,
   package: Package,
   sparkles: Sparkles,
+  flag: Flag,
+  zap: Zap,
   book: BookOpen,
 };
 
@@ -184,7 +189,7 @@ export function KnowledgePage() {
   );
 
   return (
-    <div className="fade-in mx-auto max-w-[1240px] px-7 py-6">
+    <div className="fade-in workspace-page px-7 py-6">
       <SectionTitle
         title="知识库"
         action={
@@ -225,8 +230,8 @@ export function KnowledgePage() {
           <LoaderCircle size={15} className="mr-2 animate-spin" /> 正在读取知识域
         </div>
       ) : (
-        <div className="grid grid-cols-[248px_minmax(0,1fr)] gap-4">
-          <aside className="paper-card h-[650px] overflow-y-auto p-2.5">
+        <div className="workspace-fill grid grid-cols-[260px_minmax(0,1fr)] gap-4">
+          <aside className="paper-card h-full min-h-0 overflow-y-auto p-2.5">
             <div className="px-2 pb-2 pt-1">
               <div className="text-[10px] font-semibold tracking-[0.16em] text-muted">
                 故事资料类型
@@ -266,7 +271,7 @@ export function KnowledgePage() {
             })}
           </aside>
 
-          <section className="paper-card h-[650px] overflow-hidden">
+          <section className="paper-card h-full min-h-0 overflow-hidden">
             {activeDomain ? (
               <div className="grid h-full grid-cols-[300px_minmax(0,1fr)]">
                 <div className="flex min-h-0 flex-col border-r border-line">
@@ -332,17 +337,21 @@ export function KnowledgePage() {
                           编辑条目
                         </Button>
                       </div>
-                      <p className="mt-4 text-[12px] leading-6 text-ink-soft">
+                      <Markdown className="mt-4 text-[12px] leading-6 text-ink-soft">
                         {activeEntry.summary || "尚未填写摘要。"}
-                      </p>
+                      </Markdown>
                       <div className="mt-5 grid grid-cols-2 gap-x-5 gap-y-4">
                         {currentFields.map((field) => (
                           <div key={field.key} className="border-t border-line pt-3">
                             <div className="text-[9.5px] tracking-wide text-muted">
                               {field.label}
                             </div>
-                            <div className="mt-1.5 whitespace-pre-wrap text-[11.5px] leading-6 text-ink-soft">
-                              {field.value || <span className="text-muted/60">未填写</span>}
+                            <div className="mt-1.5 text-[11.5px] leading-6 text-ink-soft">
+                              {field.value ? (
+                                <Markdown>{field.value}</Markdown>
+                              ) : (
+                                <span className="text-muted/60">未填写</span>
+                              )}
                             </div>
                           </div>
                         ))}

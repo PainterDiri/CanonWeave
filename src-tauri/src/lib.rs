@@ -34,6 +34,8 @@ mod motifs;
 mod export;
 mod foundation;
 mod embedding;
+mod craft;
+mod harness;
 
 use tauri_specta::{collect_commands, Builder};
 use tauri::Manager;
@@ -93,7 +95,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
         agent_run_get, agent_run_execute, agent_run_pause, agent_run_cancel,
         agent_run_resume, agent_run_retry_step, agent_foundation, agent_next_actions,
         agent_style_proposal, embedding_status,
-        embedding_test, embedding_index, embedding_cancel_index, hybrid_search
+        embedding_test, embedding_index, embedding_cancel_index, hybrid_search,
+        harness_send, harness_cancel, harness_traces, harness_paths, project_guide_get,
+        project_guide_save, story_thread_list, story_thread_save, story_thread_delete,
+        craft_report, workflow_pipeline
     ])
 }
 

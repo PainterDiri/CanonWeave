@@ -17,6 +17,7 @@ import { Badge, Button, Field, Input, Modal, SectionTitle, Textarea } from "@/co
 import { AgentSuggestion } from "@/components/AgentSuggestion";
 import {
   ipc,
+  onBlueprintProgress,
   type NarrativeBlueprint,
   type NarrativeBlueprintEditInput,
   type NarrativeBlueprintView,
@@ -53,9 +54,21 @@ export function BlueprintPanel({
   const [view, setView] = useState<NarrativeBlueprintView | null>(null);
   const [medium, setMedium] = useState<Medium>("novel");
   const [strategy, setStrategy] = useState<Strategy>("adaptive");
+  const [depth, setDepth] = useState<"epic" | "standard" | "quick">("epic");
   const [targetUnits, setTargetUnits] = useState(60);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [progressLabel, setProgressLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let dispose = () => {};
+    void onBlueprintProgress((event) => setProgressLabel(`${event.label}（${event.step}/${event.total}）`)).then(
+      (unlisten) => {
+        dispose = unlisten;
+      },
+    );
+    return () => dispose();
+  }, []);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nodeOpen, setNodeOpen] = useState(false);
@@ -96,12 +109,14 @@ export function BlueprintPanel({
       return;
     }
     setGenerating(true);
+    setProgressLabel(null);
     setError(null);
     try {
       const next = await ipc.blueprintGenerate({
         medium,
         structureStrategy: strategy,
         targetUnits: strategy === "fixed" ? targetUnits : null,
+        depth,
       });
       setView(next);
       await refreshProject();
@@ -273,6 +288,28 @@ export function BlueprintPanel({
               </button>
             ))}
           </div>
+          <div className="mt-3 grid grid-cols-3 gap-3" role="radiogroup" aria-label="地基规模">
+            {(
+              [
+                ["epic", "史诗级地基", "分层构建：世界与能力体系 → 势力 → 人物群像 → 暗线 → 漏洞审查。适合长篇连载，约 7 次模型调用。"],
+                ["standard", "标准地基", "同样分层，但规模较小，适合中篇或单卷故事。"],
+                ["quick", "快速草案", "一次生成，只用于试方向。"],
+              ] as const
+            ).map(([key, label, hint]) => (
+              <button
+                key={key}
+                role="radio"
+                aria-checked={depth === key}
+                onClick={() => setDepth(key)}
+                className={`rounded-xl border p-3.5 text-left transition ${
+                  depth === key ? "border-teal bg-teal-soft/40" : "border-line bg-paper/50 hover:border-teal/40"
+                }`}
+              >
+                <div className="text-[12px] font-semibold text-ink">{label}</div>
+                <div className="mt-1 text-[10.5px] leading-5 text-muted">{hint}</div>
+              </button>
+            ))}
+          </div>
           {strategy === "fixed" ? (
             <div className="mt-3 max-w-[260px]">
               <Field label="目标章节 / 任务数">
@@ -293,7 +330,7 @@ export function BlueprintPanel({
               disabled={generating || !hasPremise}
               icon={generating ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
             >
-              {generating ? "正在建立地基与逻辑链" : "生成叙事蓝本"}
+              {generating ? progressLabel ?? "正在建立地基与逻辑链" : "生成叙事蓝本"}
             </Button>
             {!hasPremise ? (
               <Button tone="ghost" onClick={onNeedPremise}>

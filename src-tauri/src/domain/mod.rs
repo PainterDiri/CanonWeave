@@ -9,6 +9,7 @@ pub mod types_m6;
 pub mod types_m7;
 pub mod types_m8;
 pub mod types_m9;
+pub mod types_m10;
 
 pub use style_types::*;
 pub use types::*;
@@ -21,3 +22,4 @@ pub use types_m6::*;
 pub use types_m7::*;
 pub use types_m8::*;
 pub use types_m9::*;
+pub use types_m10::*;

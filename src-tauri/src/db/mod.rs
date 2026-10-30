@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 const MIGRATIONS: &[(i64, &str, &str)] = &[
     (1, "init", include_str!("../../migrations/001_init.sql")),
@@ -52,6 +52,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         10,
         "graph_wiki_hierarchy",
         include_str!("../../migrations/010_graph_wiki_hierarchy.sql"),
+    ),
+    (
+        11,
+        "harness_craft",
+        include_str!("../../migrations/011_harness_craft.sql"),
     ),
 ];
 
@@ -192,7 +197,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(schema, 10);
+        assert_eq!(schema, 11);
         let embedding_columns: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('embedding')
@@ -229,5 +234,31 @@ mod tests {
             .unwrap();
         assert_eq!(page_key, "w");
         assert_eq!(source_hash, "wh");
+        let craft_columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('outline_node')
+                 WHERE name IN ('value_shift','crisis','hook','reveal')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(craft_columns, 4);
+        let harness_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name IN ('project_guide','story_thread')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(harness_tables, 2);
+        let run_link: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('chat_message') WHERE name='agent_run_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_link, 1);
     }
 }

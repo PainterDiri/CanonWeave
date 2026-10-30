@@ -446,6 +446,108 @@ pub fn narrative_foundation_user_prompt(
     )
 }
 
+/// 分层构建故事圣经时每一层共用的标准。
+const WORLD_DEPTH_RULES: &str = r#"通用标准（每一层都必须满足）：
+- 设定为冲突服务：每个条目都要写清它制造什么冲突、限制谁、给谁机会、会被谁利用。
+- 冰山原则：写出读者暂时看不到的水下部分（历史成因、真实动机、隐藏代价、错误认知），供后续伏笔与反转使用。
+- 自洽压力测试：对每个能力或规则追问“为什么最强者不直接用它解决一切”；对每个势力追问“为什么它至今没有赢、也没有被消灭”。答案必须写进设定。
+- 具体可检验：使用专有名词、数量、地点、时间、代价；禁止“神秘力量”“强大组织”“古老秘密”“复杂关系”之类空话。
+- 彼此咬合：新条目必须与前几层已有条目建立关系（谁控制谁、谁需要谁、谁欠谁、谁在骗谁），不能各自孤立。
+- 信息密度：单个字段 30 至 150 字，写事实与因果，不写抒情；宁可多条精炼，也不要少条空泛。
+- 已确认设定优先：作者已确认的人物、知识条目与守则必须保留原名并在此基础上扩展，不得矛盾或改名。
+- 只输出 JSON 对象，不要 Markdown 代码块，文本使用中文。"#;
+
+/// 分层故事圣经：world → factions → cast → synthesis → critique。
+/// 一次请求只建一层，后层读取前层结果，避免单次输出把世界观压扁成几条摘要。
+pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
+    let epic = scale == "epic";
+    let body = match layer {
+        "world" => format!(
+            r#"你是长篇幻想/悬疑/科幻作品的世界观总设计。本层只建立“世界运行规律”，不写人物和章节。
+需要产出：
+1. 能力/力量体系（{systems}）：每个体系作为 kind="concept" 的元素，metadata 写成
+   {{"system":"体系名","tiers":[{{"rank":"阶位/序列","name":"称谓","abilities":"该阶能做什么","cost":"代价","risk":"失控/反噬风险"}}],"acquisition":"如何获得与晋升","cost":"通用代价","limits":"硬边界","counters":"克制与失效条件","socialImpact":"对社会结构、经济、法律的影响"}}
+   阶位不少于 {tiers} 级；每一阶都要有明确代价，越强代价越重；必须写清普通人与掌握者的力量差，以及社会如何管控它。
+2. 世界规则（kind="world_rule"）不少于 {rules} 条：物理/超自然法则、禁忌、社会制度、资源稀缺性。每条写 constraints（边界）与 secret（大多数人不知道的真相）。
+3. 关键地点（kind="location"）不少于 {places} 个：地理关系、控制者、资源、危险、在故事中承担的功能。
+4. 关键物品/遗物（kind="item"）不少于 {items} 个：来源、能力、代价、持有者、争夺者。
+5. 历史时间线 timeline 不少于 {history} 条，跨越至少 3 个时代：每条写前因、结果、至今仍在影响什么（consequence）、读者何时得知（revealAt）。
+输出：{{"elements":[{{"kind":"","name":"","role":"在冲突中的功能","summary":"","constraints":[],"secret":"","leverage":"","relations":[{{"target":"","type":"","tension":""}}],"metadata":{{}}}}],"timeline":[{{"title":"","storyTime":"时代/年份","cause":"","participants":[],"outcome":"","consequence":"","revealAt":""}}]}}"#,
+            systems = if epic { "1 至 2 个，主体系必须完整" } else { "1 个" },
+            tiers = if epic { 7 } else { 4 },
+            rules = if epic { 8 } else { 4 },
+            places = if epic { 8 } else { 4 },
+            items = if epic { 4 } else { 2 },
+            history = if epic { 10 } else { 5 },
+        ),
+        "factions" => format!(
+            r#"你是长篇作品的势力格局设计师。本层基于已建立的世界规律，设计势力/组织（kind="faction"），不写章节。
+需要产出不少于 {factions} 个势力，必须包含：至少两个结构性对立的阵营、至少一个中立或第三方（商会、学派、地下网络等）、至少一个隐藏势力（大多数角色不知道其存在或真实目的）。
+每个势力：
+- summary：成立缘由、现在的规模与公开形象；externalGoal：当前目标；internalNeed：组织真正缺什么；fear：最怕失去什么；flaw：组织病（腐败、教条、派系斗争等）；leverage：资源与筹码；secret：不可告人的秘密及暴露后果；constraints：底线与禁令。
+- metadata：{{"structure":"层级与编制（至少 3 级，写出各级称谓与人数量级）","leader":"首领姓名与外号","doctrine":"信条","resources":"人力/财力/超凡资源","territory":"控制范围","methods":"惯用手段","schism":"内部裂痕与派系","powerAccess":"与能力体系的关系（垄断/限制/研究/走私哪一阶）","recruitment":"如何吸收成员"}}
+- relations：与其他每个主要势力的关系（同盟/敌对/利用/渗透/交易），写清当前矛盾点 tension。
+另补充 timeline：势力间的关键历史事件（战争、背叛、条约、清洗）不少于 {events} 条。
+输出：{{"elements":[...],"timeline":[...]}}，元素字段与前层相同。"#,
+            factions = if epic { 7 } else { 3 },
+            events = if epic { 6 } else { 3 },
+        ),
+        "cast" => format!(
+            r#"你是长篇作品的人物总设计。本层基于世界规律与势力格局，设计人物群像（kind="character"），不写章节。
+需要不少于 {cast} 个人物，必须包含：主角、明面对手、隐藏对手（真正的幕后推动者）、导师或引路人、宿敌/竞争者、至少一个会背叛或立场摇摆的人物，以及各主要势力的首领或关键执行者。
+每个人物：
+- summary：身份、年龄段、外在印象与一句话核心矛盾；externalGoal：想得到什么；internalNeed：真正需要什么；fear；flaw：会如何自毁；leverage：筹码；secret：秘密及暴露后果；constraints：不会做的事（底线）。
+- metadata：{{"faction":"所属势力或无","ability":"所用能力体系与阶位，以及标志性用法和代价","background":"塑造此人的关键往事（与历史时间线挂钩）","arc":"起点状态 → 终点状态","voice":"说话方式与口头习惯","wound":"旧伤","misbelief":"对世界或自己的错误信念"}}
+- relations：与至少 3 个其他人物或势力的关系，写清 tension（利益冲突、恩怨、亏欠、误会）。主角与每个对手之间必须存在无法两全的目标冲突。
+- 对手必须有自己合理甚至令人同情的理由，以及推进中的计划，而不是等主角上门。
+输出：{{"elements":[...]}}，元素字段与前层相同。"#,
+            cast = if epic { 12 } else { 5 },
+        ),
+        "synthesis" => format!(
+            r#"你是总编剧。前三层已经建立世界、势力与人物。本层把它们收束成作品的总体戏剧结构，不写章节。
+需要产出：
+- title、coreDramaticQuestion（某人能否在某种代价下达成某目标）、narrativePromise、openingState、endingState、themeQuestion。
+- threads 不少于 {threads} 条：main 主线、relationship 关系线、mystery 谜团线（targetState 中写出谜底）、faction 势力线、theme 主题线。每条写 dramaticQuestion、openingState、targetState、stakes，并说明它与哪条线互相施压。
+- timeline：故事开局前后的“暗线时间表”不少于 {plans} 条——隐藏对手与各势力在主角不知情时正在推进的计划步骤，每条写 storyTime、cause、outcome、consequence，以及主角/读者何时发现（revealAt）。
+输出：{{"title":"","coreDramaticQuestion":"","narrativePromise":"","openingState":"","endingState":"","themeQuestion":"","threads":[{{"kind":"","title":"","dramaticQuestion":"","openingState":"","targetState":"","stakes":""}}],"timeline":[...]}}"#,
+            threads = if epic { 6 } else { 3 },
+            plans = if epic { 8 } else { 4 },
+        ),
+        _ => r#"你是严苛的设定审校编辑，专门找长篇设定的逻辑漏洞。你会收到完整故事圣经。
+逐类审查并找出至少 8 个具体问题：
+1. 能力漏洞：某能力能轻易绕过主线困难、阶位代价不成比例、克制关系缺失。
+2. 势力逻辑：目标与手段矛盾、早该发生的冲突没有发生、隐藏势力为何不被发现。
+3. 人物动机：行动缺少动机、对手太被动或太蠢、关系只有标签没有张力。
+4. 时间线：先后矛盾、历史事件没有留下后果、暗线计划与开局状态冲突。
+5. 空泛条目：只有氛围没有功能的设定。
+6. 结构缺口：缺少能支撑长篇的冲突来源、中段没有升级空间。
+修复方式：直接给出修订后的完整条目（同名同类替换），必要时新增条目；不得删除作者已确认的设定。
+输出：{"issues":[{"target":"条目名","problem":"问题","fix":"修复思路"}],"patch":{"elements":[完整元素],"timeline":[完整事件],"threads":[完整叙事线]}}"#
+            .to_string(),
+    };
+    format!("{body}\n\n{WORLD_DEPTH_RULES}")
+}
+
+pub fn world_layer_user_prompt(
+    layer: &str,
+    premise: &Value,
+    medium: &str,
+    canon: &str,
+    so_far: &Value,
+) -> String {
+    let instruction = match layer {
+        "world" => "请建立世界运行规律层。",
+        "factions" => "请在已有世界规律上建立势力格局层。",
+        "cast" => "请在已有世界与势力上建立人物群像层。",
+        "synthesis" => "请把以上内容收束成总体戏剧结构。",
+        _ => "请审查以下完整故事圣经并输出修订补丁。",
+    };
+    format!(
+        "已确认种子卡：\n{premise}\n\n媒介：{medium}\n\n作者已确认的故事资料与守则（必须保留）：\n{canon}\n\n\
+         已完成的故事圣经：\n{so_far}\n\n{instruction}"
+    )
+}
+
 pub fn narrative_chain_system_prompt() -> String {
     r#"你是长篇叙事因果链编辑与游戏任务编排架构师。你会收到已完成的叙事地基。你必须把人物欲望、世界规则、时间线、势力压力转化为唯一的可验证因果链。
 章节不是逻辑链的来源；逻辑链才是统筹章节、任务和演出的唯一依据。
@@ -455,6 +557,14 @@ pub fn narrative_chain_system_prompt() -> String {
 认知变化必须写清“谁知道、之前误以为什么、现在确认什么”，用于控制信息差与反转。
 反转必须来自已埋设的信息、人物选择或世界规则，不能靠临时增加设定。
 结尾必须回应当前阶段的核心戏剧问题，同时改变世界、关系或人物自我认知中的至少两项。
+
+避免“水”和死板的硬性要求：
+- 节点之间用“但是/因此”连接，而不是“然后”：每个节点要么因上一节点而发生，要么让上一节点的成果受挫。
+- 对手是主动的：至少三分之一节点由对手或势力的暗线计划推动，主角是在应对和反制，而不是逐个打怪。
+- 逐级升级：赌注、代价、对手层级和世界揭示范围随节点上升；同类冲突不得重复出现两次以上。
+- 每个节点至少牵动两条叙事线；中段必须有一次让主角目标本身被动摇的反转。
+- 能力不能白给：主角每次突破都要付出地基中写明的代价，并带来新的麻烦。
+- 充分使用地基：主要势力、隐藏势力、关键物品和至少一半主要人物都要在链上承担功能。
 
 如果是游戏作品，还要为每个逻辑节点提供呈现契约：
 - dialogue：以 NPC 对话为主，小量旁白。
@@ -504,7 +614,7 @@ pub fn narrative_chain_system_prompt() -> String {
   ]
 }
 节点必须从 orderNo 1 连续编号；边必须形成从唯一起点到终局的完整可达网络，不能有孤立节点。
-至少 6 个节点，长线作品应为阶段保留后续扩展空间，但本阶段因果链必须自洽。使用中文。"#
+至少 12 个节点（超长篇至少 18 个），长线作品应为阶段保留后续扩展空间，但本阶段因果链必须自洽。使用中文。"#
         .into()
 }
 
@@ -591,7 +701,12 @@ pub fn outline_chapter_system_prompt() -> String {
 章节不是逻辑链的来源；一章既不能多讲同一逻辑节点，也不能跳过关键代价、选择或认知变化。
 相邻章节必须形成因果，不允许平均分配情节或为了凑数重复换皮。
 本批次的 number 必须连续，数量和范围以用户要求为准。只输出 JSON 数组，不要 Markdown。每项字段：
-{"number":1,"title":"章名","goal":"本章目标","conflict":"本章冲突","turn":"本章转折","payoff":"伏笔操作","logicNodeIds":["逻辑节点标题或编号"],"presentationMode":"prose|dialogue|environmental|prop_text|cutscene|mixed|silent","narrativeFunction":"本章在整体逻辑链中的功能"}
+{"number":1,"title":"章名","goal":"本章目标","conflict":"本章冲突","turn":"本章转折","payoff":"伏笔操作","logicNodeIds":["逻辑节点标题或编号"],"presentationMode":"prose|dialogue|environmental|prop_text|cutscene|mixed|silent","narrativeFunction":"本章在整体逻辑链中的功能","valueShift":"+安全 → -暴露","crisis":"主角被迫在两个代价之间做出的选择","hook":"章末留给读者的具体悬念","reveal":"读者在本章新知道、而某些角色仍不知道的信息"}
+工艺要求：
+- valueShift 写成“起点 → 终点”，并用 + 或 - 标出价值正负；起点与终点必须不同，否则这一章没有发生变化。
+- 相邻章节的终点极性不要连续三章相同，避免节奏单调。
+- crisis 必须是两难：两个选项都有代价，不能是“做对的事还是做错的事”。
+- hook 必须具体到人物、物件或信息，不写“命运的齿轮开始转动”之类空话。
 不得提前写出后续批次没有要求的章节。所有文本使用中文。"#
         .into()
 }
@@ -721,12 +836,198 @@ pub fn chat_system_prompt(mode: &str, premise: Option<&Value>, constraints: &[St
     prompt
 }
 
+/// 模型请求调用的一个工具。`arguments` 是模型给出的原始 JSON 字符串。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolTurnOutput {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub finish_reason: Option<String>,
+}
+
+/// 把流式 `delta.tool_calls` 分片按 index 拼回完整调用。
+#[derive(Debug, Default)]
+pub struct ToolCallAccumulator {
+    calls: Vec<ToolCall>,
+}
+
+impl ToolCallAccumulator {
+    pub fn push(&mut self, delta: &Value) {
+        let Some(items) = delta.as_array() else {
+            return;
+        };
+        for item in items {
+            let index = item
+                .get("index")
+                .and_then(Value::as_u64)
+                .map(|index| index as usize)
+                .unwrap_or(self.calls.len().saturating_sub(1));
+            while self.calls.len() <= index {
+                self.calls.push(ToolCall::default());
+            }
+            let call = &mut self.calls[index];
+            if let Some(id) = item.get("id").and_then(Value::as_str) {
+                if !id.is_empty() {
+                    call.id = id.to_string();
+                }
+            }
+            if let Some(name) = item.pointer("/function/name").and_then(Value::as_str) {
+                call.name.push_str(name);
+            }
+            if let Some(arguments) = item.pointer("/function/arguments").and_then(Value::as_str) {
+                call.arguments.push_str(arguments);
+            }
+        }
+    }
+
+    pub fn finish(self) -> Vec<ToolCall> {
+        self.calls
+            .into_iter()
+            .enumerate()
+            .filter(|(_, call)| !call.name.trim().is_empty())
+            .map(|(index, mut call)| {
+                if call.id.is_empty() {
+                    call.id = format!("call_{index}");
+                }
+                call
+            })
+            .collect()
+    }
+}
+
+impl LlmClient {
+    /// Agent harness 的一轮模型调用：流式输出正文，同时累积原生工具调用。
+    /// `tools` 为 None 时只请求文本（用于文本协议回退）。
+    pub async fn stream_tool_turn<F>(
+        &self,
+        messages: &[Value],
+        tools: Option<&Value>,
+        cancel: Arc<AtomicBool>,
+        mut on_delta: F,
+    ) -> AppResult<ToolTurnOutput>
+    where
+        F: FnMut(&str) + Send,
+    {
+        let mut body = json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": true
+        });
+        if let Some(tools) = tools {
+            body["tools"] = tools.clone();
+            body["tool_choice"] = json!("auto");
+        }
+        let response = self
+            .http
+            .post(&self.base_url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::Message(format!("模型请求失败：{e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Message(format_http_error(status.as_u16(), &body)));
+        }
+        let mut stream = response.bytes_stream();
+        let mut pending = String::new();
+        let mut output = ToolTurnOutput::default();
+        let mut calls = ToolCallAccumulator::default();
+        let mut handle_line = |line: &str, output: &mut ToolTurnOutput| {
+            let Some(data) = line.strip_prefix("data:").map(str::trim) else {
+                return;
+            };
+            if data.is_empty() || data == "[DONE]" {
+                return;
+            }
+            let Ok(value) = serde_json::from_str::<Value>(data) else {
+                return;
+            };
+            if let Some(delta) = value
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            {
+                output.content.push_str(delta);
+                on_delta(delta);
+            }
+            if let Some(tool_calls) = value.pointer("/choices/0/delta/tool_calls") {
+                calls.push(tool_calls);
+            }
+            if let Some(reason) = value
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+            {
+                output.finish_reason = Some(reason.to_string());
+            }
+        };
+        while let Some(chunk) = stream.next().await {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(AppError::Message("生成已取消".into()));
+            }
+            let chunk = chunk.map_err(|e| AppError::Message(format!("读取流式响应失败：{e}")))?;
+            pending.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(index) = pending.find('\n') {
+                let line = pending[..index].trim_end_matches('\r').to_string();
+                pending.drain(..=index);
+                handle_line(&line, &mut output);
+            }
+        }
+        handle_line(pending.trim(), &mut output);
+        drop(handle_line);
+        output.tool_calls = calls.finish();
+        if output.content.is_empty() && output.tool_calls.is_empty() {
+            return Err(AppError::Message(
+                "模型没有返回文本或工具调用。请检查模型是否支持流式输出。".into(),
+            ));
+        }
+        Ok(output)
+    }
+}
+
+/// 网关拒绝 `tools` 参数时（不支持函数调用的模型），harness 改用文本协议。
+pub fn is_tool_protocol_unsupported(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    (lower.contains("400") || lower.contains("422") || lower.contains("not support"))
+        && ["tool", "function"].iter().any(|needle| lower.contains(needle))
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
     use super::*;
+
+    #[test]
+    fn accumulates_streamed_tool_call_fragments() {
+        let mut calls = ToolCallAccumulator::default();
+        calls.push(&json!([{"index":0,"id":"call_a","function":{"name":"read_","arguments":"{\"pa"}}]));
+        calls.push(&json!([{"index":0,"function":{"name":"path","arguments":"th\":\"/人物\"}"}}]));
+        calls.push(&json!([{"index":1,"function":{"name":"search","arguments":"{}"}}]));
+        let calls = calls.finish();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].name, "read_path");
+        assert_eq!(calls[0].arguments, "{\"path\":\"/人物\"}");
+        assert_eq!(calls[1].id, "call_1");
+    }
+
+    #[test]
+    fn recognizes_tool_protocol_rejection() {
+        assert!(is_tool_protocol_unsupported(
+            "模型服务返回 400：This model does not support tools"
+        ));
+        assert!(!is_tool_protocol_unsupported("模型服务返回 401：invalid key"));
+    }
 
     #[test]
     fn parses_openai_sse_delta() {

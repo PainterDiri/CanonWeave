@@ -9,15 +9,17 @@ import {
   Sparkles,
   Wand2,
   Compass,
+  Spline,
 } from "lucide-react";
 import { Badge, Button, SectionTitle, Textarea } from "@/components/ui";
 import { ipc, type Premise } from "@/lib/ipc";
 import { useAppStore } from "@/stores/ui";
 import { BlueprintPanel } from "./BlueprintPanel";
 import { OutlinePanel } from "./OutlinePanel";
+import { CraftPanel } from "./CraftPanel";
 import { PremiseEditor } from "./PremiseEditor";
 
-type Tab = "seed" | "blueprint" | "outline";
+type Tab = "seed" | "blueprint" | "outline" | "craft";
 
 const samples = [
   "一个只能在雨夜出现的旧车站，和一张写着明天日期的车票。",
@@ -111,6 +113,7 @@ export function SeedPage() {
           { key: "seed" as const, label: "种子卡", icon: Sparkles },
           { key: "blueprint" as const, label: "叙事蓝本", icon: Compass },
           { key: "outline" as const, label: "卷章编排", icon: Wand2 },
+          { key: "craft" as const, label: "工艺与线程", icon: Spline },
         ].map((item) => {
           const Icon = item.icon;
           return (
@@ -124,7 +127,7 @@ export function SeedPage() {
               <Icon size={14} />
               {item.label}
               {tab === item.key ? (
-                <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-teal" />
+                <span className="tab-thread" aria-hidden />
               ) : null}
             </button>
           );
@@ -153,13 +156,10 @@ export function SeedPage() {
                 className="pointer-events-none absolute inset-0 opacity-70"
                 style={{
                   backgroundImage:
-                    "radial-gradient(circle at 92% 8%, rgba(17,75,69,0.08), transparent 30%), radial-gradient(circle at 4% 100%, rgba(184,134,46,0.08), transparent 32%)",
+                    "radial-gradient(circle at 92% 8%, rgba(47,94,63,0.09), transparent 30%), radial-gradient(circle at 4% 100%, rgba(156,199,154,0.14), transparent 32%)",
                 }}
               />
               <div className="relative">
-                <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-teal">
-                  <Sparkles size={13} /> One line
-                </div>
                 <h2 className="display text-[26px] text-ink">你的故事从哪一刻开始？</h2>
                 <p className="mt-2 max-w-2xl text-[12.5px] leading-6 text-muted">
                   一句话、一个画面，或者一句冲突。系统会给出三种可支撑长篇的走向，每一种都可以继续追问，最终由你确认。
@@ -268,6 +268,8 @@ export function SeedPage() {
       {!loading && tab === "outline" ? (
         <OutlinePanel hasPremise={Boolean(active)} onSwitchToSeed={() => setTab("seed")} />
       ) : null}
+
+      {!loading && tab === "craft" ? <CraftPanel /> : null}
 
       <PremiseEditor
         premise={editing}

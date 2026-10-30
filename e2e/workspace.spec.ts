@@ -447,7 +447,7 @@ async function installMock(page: import("@playwright/test").Page) {
                 },
               ];
             case "chat_messages_list":
-              return [
+              return ([
                 {
                   id: "m1",
                   sessionId: "s1",
@@ -473,7 +473,7 @@ async function installMock(page: import("@playwright/test").Page) {
                   linkedCandidateIds: [],
                   pinned: false,
                 },
-              ];
+              ] as any[]).concat((window as any).__harnessMessages ?? []);
             case "chat_candidates":
               return [candidate, candidate2];
             case "agent_tools":
@@ -1173,8 +1173,205 @@ async function installMock(page: import("@playwright/test").Page) {
                 words: 23400,
                 includesWiki: true,
               };
+            case "workflow_pipeline":
+              return {
+                activeKey: "craft",
+                stages: [
+                  ["premise", "创作契约", "done", 1, "种子卡已确认", "seed"],
+                  ["guide", "作者守则", "optional", 0, "可选：写下 Agent 每次都必须遵守的规则", "canon"],
+                  ["foundation", "故事圣经地基", "done", 1, "7/7 项通过", "characters"],
+                  ["causality", "因果主线", "done", 1, "叙事蓝本已确认", "seed"],
+                  ["structure", "卷章骨架", "done", 1, "3/10 章已确认", "seed"],
+                  ["craft", "章节工艺卡", "active", 0.33, "1/3 章具备价值转变与钩子 · 1 条叙事线程", "seed"],
+                  ["draft", "正文起草", "todo", 0.2, "2/10 章已有正文", "studio"],
+                  ["revision", "审计与修订", "todo", 0.4, "1 个未处理冲突 · 2 个待确认候选", "audit"],
+                ].map(([key, label, status, progress, detail, nav]) => ({
+                  key,
+                  label,
+                  description: `${label}阶段说明`,
+                  status,
+                  progress,
+                  detail,
+                  nav,
+                  prompt: `请推进${label}`,
+                })),
+              };
+            case "craft_report":
+              return {
+                chapterCount: 3,
+                chaptersWithShift: 1,
+                chaptersWithHook: 2,
+                openThreads: 1,
+                checks: [
+                  {
+                    code: "craft.value_shift_missing",
+                    severity: "warning",
+                    chapter: 2,
+                    threadId: null,
+                    message: "第 2 章《钥匙》没有写价值转变",
+                    suggestion: "用“+起点 → -终点”写清这一章让什么发生了变化。",
+                  },
+                ],
+              };
+            case "story_thread_list":
+              return [
+                {
+                  id: "t1",
+                  kind: "inquiry",
+                  title: "下周寄出的信",
+                  question: "父亲为什么能寄出未来的信？",
+                  openChapter: 1,
+                  closeChapter: null,
+                  status: "open",
+                  notes: "",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  updatedAt: "2026-10-20T08:00:00Z",
+                },
+              ];
+            case "project_guide_get":
+              return { content: "第三人称限知，只跟随林澈。", updatedAt: "2026-10-20T08:00:00Z" };
+            case "harness_paths":
+              return ["/人物/林澈", "/章节/1", "/章节/2", "/守则"];
+            case "harness_cancel":
+              return true;
+            case "premise_confirm":
+              return { ...premise, id: args?.id ?? "pd1", status: "confirmed" };
+            case "harness_traces":
+              return (window as any).__harnessTraces ?? [];
+            case "harness_send": {
+              const traces = [
+                {
+                  stepId: "hs1",
+                  seq: 1,
+                  toolName: "read_path",
+                  title: "读取 /大纲/2",
+                  input: { path: "/大纲/2" },
+                  summary: "412 字",
+                  status: "completed",
+                  candidateIds: [],
+                },
+                {
+                  stepId: "hs2",
+                  seq: 2,
+                  toolName: "propose_craft",
+                  title: "提出工艺卡修订 · 第 2 章",
+                  input: { chapter: 2 },
+                  summary: "第 2 章 · 2 个字段",
+                  status: "completed",
+                  candidateIds: ["cc1"],
+                },
+                {
+                  stepId: "hs2b",
+                  seq: 3,
+                  toolName: "generate_seed",
+                  title: "生成种子卡三方向",
+                  input: { logline: "葬礼上所有人都收到父亲寄自下周的信" },
+                  summary: "2 个方向",
+                  status: "completed",
+                  candidateIds: [],
+                  action: {
+                    type: "approval",
+                    group: "premise",
+                    title: "选定一张种子卡",
+                    items: [
+                      { kind: "premise", id: "pd1", title: "未来信是父亲留下的求救", summary: "林澈必须在一周内阻止父亲的死亡" },
+                      { kind: "premise", id: "pd2", title: "未来信是凶手的挑衅", summary: "寄信人比所有人都早知道结局" },
+                    ],
+                  },
+                },
+                {
+                  stepId: "hs3",
+                  seq: 4,
+                  toolName: "ask_author",
+                  title: "询问作者",
+                  input: { question: "钥匙应该由谁交出？", options: ["林澈主动交出", "守夜人强行夺走"] },
+                  summary: "钥匙应该由谁交出？",
+                  status: "completed",
+                  candidateIds: [],
+                },
+              ];
+              const harnessUser = {
+                id: "hm1",
+                sessionId: "s1",
+                seq: 3,
+                role: "user",
+                content: args?.content ?? "",
+                model: "",
+                tokens: 0,
+                createdAt: "2026-10-20T08:30:00Z",
+                linkedCandidateIds: [],
+                pinned: false,
+                agentRunId: null,
+              };
+              const harnessAssistant = {
+                id: "hm2",
+                sessionId: "s1",
+                seq: 4,
+                role: "assistant",
+                content: "我读了第 2 章的工艺卡，提出了价值转变与钩子的修订候选。钥匙的归属需要你来决定。\n下一步：在候选区确认工艺卡修订。",
+                model: "gpt-4o-mini",
+                tokens: 0,
+                createdAt: "2026-10-20T08:30:05Z",
+                linkedCandidateIds: ["cc1"],
+                pinned: false,
+                agentRunId: "hr1",
+              };
+              (window as any).__harnessMessages = [harnessUser, harnessAssistant];
+              (window as any).__harnessTraces = traces;
+              return {
+                runId: "hr1",
+                session: {
+                  id: "s1",
+                  scope: "seed",
+                  sceneId: null,
+                  branchId: null,
+                  parentSessionId: null,
+                  mode: "diverge",
+                  title: "葬礼上的信",
+                  model: "gpt-4o-mini",
+                  status: "active",
+                  summary: "",
+                  lastMessageAt: "2026-10-20T08:30:00Z",
+                  createdAt: "2026-10-20T08:00:00Z",
+                  pinned: true,
+                  archivedAt: null,
+                  pendingCandidates: 3,
+                  messageCount: 4,
+                },
+                userMessage: {
+                  id: "hm1",
+                  sessionId: "s1",
+                  seq: 3,
+                  role: "user",
+                  content: args?.content ?? "",
+                  model: "",
+                  tokens: 0,
+                  createdAt: "2026-10-20T08:30:00Z",
+                  linkedCandidateIds: [],
+                  pinned: false,
+                  agentRunId: null,
+                },
+                assistantMessage: {
+                  id: "hm2",
+                  sessionId: "s1",
+                  seq: 4,
+                  role: "assistant",
+                  content: "我读了第 2 章的工艺卡，提出了价值转变与钩子的修订候选。钥匙的归属需要你来决定。\n下一步：在候选区确认工艺卡修订。",
+                  model: "gpt-4o-mini",
+                  tokens: 0,
+                  createdAt: "2026-10-20T08:30:05Z",
+                  linkedCandidateIds: ["cc1"],
+                  pinned: false,
+                  agentRunId: "hr1",
+                },
+                traces,
+                candidates: [],
+                plan: [],
+                actions: [],
+              };
+            }
             case "app_info":
-              return { name: "CanonWeave", version: "0.1.0", schemaVersion: 6 };
+              return { name: "CanonWeave", version: "0.1.0", schemaVersion: 11 };
             case "plugin:event|listen":
               return 1;
             default:
@@ -1202,6 +1399,8 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   const primaryNav = page.locator("aside nav button");
   await expect(primaryNav.nth(1)).toContainText("Agent");
   await expect(primaryNav.nth(2)).toContainText("正文");
+  await expect(page.getByText("创作流水线")).toBeVisible();
+  await expect(page.getByText("章节工艺卡").first()).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: path.join("test-results", "overview.png") });
 
@@ -1217,11 +1416,23 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await expect(page.getByRole("button", { name: "叙事蓝本", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "卷章骨架", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "文笔方案", exact: true })).toBeVisible();
-  await page
-    .getByPlaceholder("继续讨论，或让 AI 推演下一场…（Enter 发送，Shift+Enter 换行）")
-    .fill("帮我生成卷章骨架");
+  await page.getByPlaceholder(/交给 Agent 的任务/).fill("/卷章 按逻辑链规划");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByText(/卷章骨架候选已生成/)).toBeVisible();
+
+  await page.getByRole("radio", { name: "执笔" }).click();
+  await page.getByPlaceholder(/交给 Agent 的任务/).fill("检查 @/章");
+  await expect(page.getByRole("button", { name: "/章节/2" })).toBeVisible();
+  await page.getByRole("button", { name: "/章节/2" }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByText(/提出了价值转变与钩子的修订候选/)).toBeVisible();
+  await expect(page.getByText("执行轨迹 · 4 步 · 1 项候选")).toBeVisible();
+  await expect(page.getByRole("button", { name: "守夜人强行夺走" })).toBeVisible();
+  await expect(page.getByText("选定一张种子卡")).toBeVisible();
+  await page.getByRole("button", { name: "选这张" }).first().click();
+  await expect(page.getByText("已确认为种子卡")).toBeVisible();
+  await page.getByText("执行轨迹 · 4 步 · 1 项候选").click();
+  await expect(page.getByText("提出工艺卡修订 · 第 2 章")).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join("test-results", "agent-chat.png") });
 
@@ -1271,6 +1482,10 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.getByRole("button", { name: "卷章编排", exact: true }).click();
   await page.waitForTimeout(350);
   await page.screenshot({ path: path.join("test-results", "outline.png") });
+  await page.getByRole("button", { name: "工艺与线程", exact: true }).click();
+  await expect(page.getByText("下周寄出的信")).toBeVisible();
+  await expect(page.getByText("第 2 章《钥匙》没有写价值转变")).toBeVisible();
+  await page.screenshot({ path: path.join("test-results", "craft.png") });
 
   await page.getByRole("button", { name: /审计/ }).click();
   await page.waitForTimeout(350);
@@ -1299,7 +1514,7 @@ test("workspace pages render with local fixture data", async ({ page }) => {
   await page.screenshot({ path: path.join("test-results", "wiki.png") });
 
   await page.getByRole("button", { name: "正文", exact: true }).click();
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(1200);
   await page.screenshot({ path: path.join("test-results", "studio.png") });
 
   await page.getByRole("button", { name: "设定与配置", exact: true }).click();
@@ -1357,4 +1572,20 @@ test("agent workbench fits both desktop review sizes", async ({ page }) => {
     ),
   ).toBe(true);
   await page.screenshot({ path: path.join("test-results", "agent-1280.png") });
+
+  // 大窗口下面板应铺满高度，而不是在下方留出大片空白。
+  await page.setViewportSize({ width: 1960, height: 1150 });
+  await page.waitForTimeout(250);
+  const gap = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("main .paper-card"));
+    const bottom = Math.max(...cards.map((card) => card.getBoundingClientRect().bottom));
+    return window.innerHeight - bottom;
+  });
+  expect(gap).toBeLessThan(60);
+  await page.screenshot({ path: path.join("test-results", "agent-1960.png") });
+
+  await page.getByRole("button", { name: "人物", exact: true }).click();
+  await expect(page.getByText("人物声音指纹")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join("test-results", "characters-1960.png") });
 });

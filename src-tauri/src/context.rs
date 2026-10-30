@@ -367,7 +367,16 @@ pub fn compile_with_semantic(
                 content
             }
             "L6" => voice_block(conn, project_id, &scene, style_override)?,
-            "L7" => scenes::scene_contract(conn, project_id, &scene)?,
+            "L7" => {
+                let contract = scenes::scene_contract(conn, project_id, &scene)?;
+                let number = scenes::get_chapter(conn, project_id, &scene.chapter_id)?.number;
+                let extras = crate::craft::task_contract_extras(conn, project_id, number)?;
+                if extras.is_empty() {
+                    contract
+                } else {
+                    format!("{contract}\n\n{extras}")
+                }
+            }
             _ => final_constraints(conn, project_id)?,
         };
         let content = clip(&content, section_budget);

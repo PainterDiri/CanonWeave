@@ -28,6 +28,7 @@ import {
   type NarrativeGenerateInput,
   type NarrativeBlueprintEditInput,
   type AgentRunCreateInput,
+  type StoryThreadInput,
 } from "./bindings";
 
 export type {
@@ -133,6 +134,15 @@ export type {
   EmbeddingStatus,
   HybridSearchHit,
   HybridSearchResult,
+  HarnessToolTrace,
+  HarnessTurnResult,
+  ProjectGuide,
+  StoryThread,
+  StoryThreadInput,
+  CraftCheck,
+  CraftReport,
+  PipelineStage,
+  WorkflowPipeline,
 } from "./bindings";
 export type { CreateProjectInput, ModelConfigInput, ModelTestResult } from "./bindings";
 
@@ -229,6 +239,8 @@ export const ipc = {
     guarded(async () => unwrap(await commands.premiseUpdate(id, input))),
   premiseConfirm: (id: string) =>
     guarded(async () => unwrap(await commands.premiseConfirm(id))),
+  premiseArchive: (id: string) =>
+    guarded(async () => unwrap(await commands.premiseArchive(id))),
   premiseDebugSources: (id: string) =>
     guarded(async () => unwrap(await commands.premiseDebugSources(id))),
   blueprintCurrent: () =>
@@ -506,7 +518,51 @@ export const ipc = {
     guarded(async () => unwrap(await commands.embeddingCancelIndex())),
   hybridSearch: (query: string, limit: number | null = 12) =>
     guarded(async () => unwrap(await commands.hybridSearch(query, limit))),
+
+  harnessSend: (sessionId: string, content: string, mode: "plan" | "write") =>
+    guarded(async () => unwrap(await commands.harnessSend(sessionId, content, mode))),
+  harnessCancel: (sessionId: string) =>
+    guarded(async () => unwrap(await commands.harnessCancel(sessionId))),
+  harnessTraces: (runId: string) =>
+    guarded(async () => unwrap(await commands.harnessTraces(runId))),
+  harnessPaths: () => guarded(async () => unwrap(await commands.harnessPaths())),
+
+  projectGuide: () => guarded(async () => unwrap(await commands.projectGuideGet())),
+  projectGuideSave: (content: string) =>
+    guarded(async () => unwrap(await commands.projectGuideSave(content))),
+  storyThreads: () => guarded(async () => unwrap(await commands.storyThreadList())),
+  storyThreadSave: (input: StoryThreadInput) =>
+    guarded(async () => unwrap(await commands.storyThreadSave(input))),
+  storyThreadDelete: (id: string) =>
+    guarded(async () => unwrap(await commands.storyThreadDelete(id))),
+  craftReport: () => guarded(async () => unwrap(await commands.craftReport())),
+  workflowPipeline: () => guarded(async () => unwrap(await commands.workflowPipeline())),
 };
+
+export type BlueprintProgressEvent = { step: number; total: number; label: string };
+
+export async function onBlueprintProgress(
+  handler: (event: BlueprintProgressEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<BlueprintProgressEvent>("blueprint://progress", (event) => handler(event.payload));
+}
+
+/** `harness://event`：delta / tool_start / tool_end / turn_end / plan / done / error。 */
+export type HarnessEvent = {
+  sessionId: string;
+  runId: string;
+  kind: "start" | "delta" | "tool_start" | "tool_end" | "turn_end" | "plan" | "done" | "error";
+  text: string;
+  data: any;
+};
+
+export async function onHarnessEvent(
+  handler: (event: HarnessEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<HarnessEvent>("harness://event", (event) => handler(event.payload));
+}
 
 export type ChatDeltaEvent = { sessionId: string; requestId: string; delta: string };
 

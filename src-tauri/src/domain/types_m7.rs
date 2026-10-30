@@ -155,6 +155,9 @@ pub struct NarrativeGenerateInput {
     pub medium: String,
     pub structure_strategy: String,
     pub target_units: Option<i32>,
+    /// quick 单次生成；standard / epic 分层构建故事圣经。缺省时按种子卡篇幅推断。
+    #[serde(default)]
+    pub depth: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

@@ -1373,6 +1373,7 @@ mod tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,
@@ -1395,6 +1396,7 @@ mod tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,
@@ -1672,6 +1674,7 @@ mod edit_tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,
@@ -1698,6 +1701,7 @@ mod edit_tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,
@@ -1721,6 +1725,7 @@ mod edit_tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,
@@ -1745,6 +1750,7 @@ mod edit_tests {
                 logic_node_ids: vec![view.nodes[0].id.clone(), view.nodes[1].id.clone()],
                 presentation_mode: "prose".into(),
                 narrative_function: "触发".into(),
+                craft: Default::default(),
             }],
         };
         crate::outline::insert_plan(&mut loaded.conn, &pid, &plan, None).unwrap();
@@ -1763,6 +1769,7 @@ mod edit_tests {
             &pid,
             &premise_id,
             &NarrativeGenerateInput {
+                depth: None,
                 medium: "novel".into(),
                 structure_strategy: "adaptive".into(),
                 target_units: None,

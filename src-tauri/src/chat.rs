@@ -50,11 +50,12 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
         created_at: row.get(7)?,
         linked_candidate_ids: serde_json::from_str(&linked).unwrap_or_default(),
         pinned: row.get(10)?,
+        agent_run_id: row.get(11)?,
     })
 }
 
 const MESSAGE_SELECT: &str = "SELECT id, session_id, seq, role, content, model, tokens,
-    created_at, created_at, linked_candidate_ids, pinned FROM chat_message";
+    created_at, created_at, linked_candidate_ids, pinned, agent_run_id FROM chat_message";
 
 pub fn create(
     conn: &Connection,

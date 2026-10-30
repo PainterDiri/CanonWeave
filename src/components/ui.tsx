@@ -89,13 +89,9 @@ export function SectionTitle({
 }) {
   return (
     <div className="mb-5 flex items-end justify-between gap-4">
-      <div>
-        {eyebrow ? (
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-teal">
-            {eyebrow}
-          </div>
-        ) : null}
+      <div className="flex items-baseline gap-3">
         <h1 className="display text-[28px] leading-tight text-ink">{title}</h1>
+        {eyebrow ? <span className="text-[11px] tracking-wide text-muted">{eyebrow}</span> : null}
       </div>
       {action}
     </div>

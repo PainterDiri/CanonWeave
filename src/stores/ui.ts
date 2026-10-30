@@ -22,6 +22,9 @@ type AppStore = {
   nav: NavKey;
   activeMode: WorkspaceMode;
   toast: string | null;
+  /** 从其它页面交给 Agent 的任务草稿，Agent 输入框打开时取用。 */
+  agentDraft: string | null;
+  setAgentDraft: (draft: string | null) => void;
   setProject: (project: ProjectSnapshot | null) => void;
   setModel: (model: ModelConfig | null) => void;
   setNav: (nav: NavKey) => void;
@@ -37,6 +40,8 @@ export const useAppStore = create<AppStore>((set) => ({
   nav: "overview",
   activeMode: "seed",
   toast: null,
+  agentDraft: null,
+  setAgentDraft: (agentDraft) => set({ agentDraft }),
   setProject: (project) => set({ project }),
   setModel: (model) => set({ model }),
   setNav: (nav) => set({ nav }),

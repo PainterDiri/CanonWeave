@@ -29,12 +29,16 @@ fn node_from_row(row: &Row<'_>) -> rusqlite::Result<OutlineNode> {
         source: row.get(14)?,
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
+        value_shift: row.get(17)?,
+        crisis: row.get(18)?,
+        hook: row.get(19)?,
+        reveal: row.get(20)?,
     })
 }
 
 const SELECT: &str = "SELECT id, parent_id, level, order_no, title, goal, conflict, turn,
     payoff, logic_node_ids, presentation_mode, narrative_function, status, branch_id,
-    source, created_at, updated_at FROM outline_node";
+    source, created_at, updated_at, value_shift, crisis, hook, reveal FROM outline_node";
 
 pub fn list(conn: &Connection, project_id: &str) -> AppResult<Vec<OutlineNode>> {
     let mut stmt = conn.prepare(&format!(
@@ -80,6 +84,15 @@ pub fn has_skeleton(conn: &Connection, project_id: &str) -> AppResult<bool> {
     )?)
 }
 
+/// 章节工艺卡：Story Grid 式价值转变 + 危机抉择 + 章末钩子 + 读者认知揭示。
+#[derive(Debug, Clone, Default)]
+pub struct ChapterCraft {
+    pub value_shift: String,
+    pub crisis: String,
+    pub hook: String,
+    pub reveal: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct OutlineChapterDraft {
     pub number: i32,
@@ -92,6 +105,7 @@ pub struct OutlineChapterDraft {
     pub logic_node_ids: Vec<String>,
     pub presentation_mode: String,
     pub narrative_function: String,
+    pub craft: ChapterCraft,
 }
 
 #[derive(Debug, Clone)]
@@ -172,8 +186,9 @@ pub fn insert_plan(
             "INSERT INTO outline_node
              (id, project_id, parent_id, level, order_no, title, goal, conflict, turn, payoff,
               status, branch_id, source, logic_node_ids, presentation_mode,
-              narrative_function, created_at, updated_at)
-             VALUES (?1,?2,?3,'chapter',?4,?5,?6,?7,?8,?9,'candidate',?10,'ai',?11,?12,?13,?14,?14)",
+              narrative_function, created_at, updated_at, value_shift, crisis, hook, reveal)
+             VALUES (?1,?2,?3,'chapter',?4,?5,?6,?7,?8,?9,'candidate',?10,'ai',?11,?12,?13,?14,?14,
+                     ?15,?16,?17,?18)",
             params![
                 uuid::Uuid::new_v4().to_string(),
                 project_id,
@@ -188,7 +203,11 @@ pub fn insert_plan(
                 serde_json::to_string(&chapter.logic_node_ids).unwrap_or_else(|_| "[]".into()),
                 chapter.presentation_mode,
                 chapter.narrative_function,
-                ts
+                ts,
+                chapter.craft.value_shift,
+                chapter.craft.crisis,
+                chapter.craft.hook,
+                chapter.craft.reveal
             ],
         )?;
     }
@@ -280,9 +299,17 @@ pub fn update(
     if input.title.trim().is_empty() {
         return Err(AppError::Message("章节标题不能为空".into()));
     }
-    get(conn, project_id, &input.id)?;
+    let current = get(conn, project_id, &input.id)?;
+    let keep = |value: &Option<String>, fallback: &str| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or(fallback)
+            .to_string()
+    };
     conn.execute(
         "UPDATE outline_node SET title=?3, goal=?4, conflict=?5, turn=?6, payoff=?7,
+            value_shift=?9, crisis=?10, hook=?11, reveal=?12,
             status=CASE WHEN status='candidate' THEN 'candidate' ELSE status END,
             source='author', updated_at=?8
          WHERE project_id=?1 AND id=?2",
@@ -294,7 +321,11 @@ pub fn update(
             input.conflict.trim(),
             input.turn.trim(),
             input.payoff.trim(),
-            now()
+            now(),
+            keep(&input.value_shift, &current.value_shift),
+            keep(&input.crisis, &current.crisis),
+            keep(&input.hook, &current.hook),
+            keep(&input.reveal, &current.reveal)
         ],
     )?;
     get(conn, project_id, &input.id)
@@ -512,6 +543,7 @@ mod tests {
                     logic_node_ids: vec![],
                     presentation_mode: "prose".into(),
                     narrative_function: "".into(),
+                    craft: Default::default(),
                 },
                 OutlineChapterDraft {
                     number: 2,
@@ -524,6 +556,7 @@ mod tests {
                     logic_node_ids: vec![],
                     presentation_mode: "prose".into(),
                     narrative_function: "".into(),
+                    craft: Default::default(),
                 },
                 OutlineChapterDraft {
                     number: 3,
@@ -536,6 +569,7 @@ mod tests {
                     logic_node_ids: vec![],
                     presentation_mode: "prose".into(),
                     narrative_function: "".into(),
+                    craft: Default::default(),
                 },
             ],
         };

@@ -38,6 +38,50 @@ const DEFAULT_DOMAINS: &[(&str, &str, &str, &str, i32, &str)] = &[
           {"key":"storyRole","label":"剧情作用","placeholder":"与哪些人物、事件和伏笔相关"}
         ]"#,
     ),
+    (
+        "faction",
+        "势力组织",
+        "组织、阵营、宗门、机构：结构、首领、信条、资源、手段与内部裂痕。",
+        "flag",
+        30,
+        r#"[
+          {"key":"structure","label":"结构与编制","placeholder":"层级、称谓、人数量级"},
+          {"key":"leader","label":"首领与核心成员","placeholder":"首领、外号、关键执行者"},
+          {"key":"doctrine","label":"信条与目标","placeholder":"公开宣称的信条与真实目标"},
+          {"key":"resources","label":"资源与地盘","placeholder":"人力、财力、超凡资源、控制范围"},
+          {"key":"methods","label":"惯用手段","placeholder":"如何行动、如何招募"},
+          {"key":"schism","label":"内部裂痕与秘密","placeholder":"派系斗争、不可告人之事"},
+          {"key":"relations","label":"对外关系","placeholder":"与其他势力的同盟、敌对、渗透"}
+        ]"#,
+    ),
+    (
+        "worldrule",
+        "世界规则",
+        "世界运行的法则、禁忌与制度：内容、边界、代价与隐藏真相。",
+        "landmark",
+        35,
+        r#"[
+          {"key":"content","label":"规则内容","placeholder":"这条规则具体规定了什么"},
+          {"key":"limits","label":"边界与例外","placeholder":"什么情况下不成立"},
+          {"key":"cost","label":"代价与后果","placeholder":"违反或利用它要付出什么"},
+          {"key":"truth","label":"隐藏真相","placeholder":"大多数人不知道的部分"},
+          {"key":"impact","label":"影响范围","placeholder":"影响哪些人物、势力和地点"}
+        ]"#,
+    ),
+    (
+        "power",
+        "能力体系",
+        "超凡能力、修炼体系、技术或魔法：阶位、获得方式、代价、边界与克制。",
+        "zap",
+        40,
+        r#"[
+          {"key":"tiers","label":"阶位与能力","placeholder":"每一阶的称谓、能力与代价"},
+          {"key":"acquisition","label":"获得与晋升","placeholder":"如何获得、如何晋升、失败后果"},
+          {"key":"cost","label":"代价与风险","placeholder":"通用代价、失控与反噬"},
+          {"key":"limits","label":"边界与克制","placeholder":"做不到什么、被什么克制、何时失效"},
+          {"key":"society","label":"社会影响","placeholder":"谁垄断、谁管控、普通人如何看待"}
+        ]"#,
+    ),
 ];
 
 fn parse_fields(text: &str) -> Vec<KnowledgeField> {

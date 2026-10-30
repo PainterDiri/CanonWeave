@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
@@ -16,8 +17,25 @@ import {
 } from "lucide-react";
 import { Badge, Button, Textarea } from "@/components/ui";
 import {
+  ActionCards,
+  AgentAvatar,
+  LiveRun,
+  MentionList,
+  ModeSwitch,
+  RunTrace,
+  actionsFromTraces,
+  mentionQuery,
+  type AgentMode,
+  type CandidateDescriber,
+  type LiveItem,
+  type PlanItem,
+} from "@/features/agent/HarnessParts";
+import {
   ipc,
   onChatDelta,
+  onBlueprintProgress,
+  onHarnessEvent,
+  type HarnessToolTrace,
   type AgentNextAction,
   type BeatOption,
   type Candidate,
@@ -45,25 +63,13 @@ const captureKinds = [
   { key: "style_sample", label: "文笔样本" },
 ];
 
+/** 只有显式的斜杠命令直接启动工作流；自然语言交给 Agent 理解并调用工具。 */
 function detectWorkflowAction(content: string): string | null {
   const text = content.trim();
   if (/^\/灵感(?:\s|$)/.test(text)) return "seed_generate";
   if (/^\/蓝本(?:\s|$)/.test(text)) return "blueprint_generate";
   if (/^\/卷章(?:\s|$)/.test(text)) return "outline_generate";
   if (/^\/文笔(?:\s|$)/.test(text)) return "style_proposal";
-  const actionVerb = /(生成|扩写|完善|打磨|重做|再来|给我|帮我|基于|根据)/;
-  if (actionVerb.test(text) && /(灵感|三个方向|三种方向|logline|一句话故事)/i.test(text)) {
-    return "seed_generate";
-  }
-  if (actionVerb.test(text) && /(叙事蓝本|蓝本|叙事地基|因果链)/.test(text)) {
-    return "blueprint_generate";
-  }
-  if (/(规划|生成|安排|重做)/.test(text) && /(卷章|章节骨架|大纲)/.test(text)) {
-    return "outline_generate";
-  }
-  if (/(推荐|设置|调整|确定|选择|给我)/.test(text) && /(文笔|叙事风格|写作风格)/.test(text)) {
-    return "style_proposal";
-  }
   return null;
 }
 
@@ -93,11 +99,30 @@ export function ChatWorkspace({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [agentMode, setAgentMode] = useState<AgentMode>(() => {
+    try {
+      return window.localStorage.getItem("cw.agentMode") === "plan" ? "plan" : "write";
+    } catch {
+      return "write";
+    }
+  });
+  const [live, setLive] = useState<LiveItem[] | null>(null);
+  const [livePlan, setLivePlan] = useState<PlanItem[]>([]);
+  const [tracesByRun, setTracesByRun] = useState<Record<string, HarnessToolTrace[]>>({});
+  const [paths, setPaths] = useState<string[]>([]);
   const requestRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const refreshProject = useAppStore((s) => s.refreshProject);
   const notify = useAppStore((s) => s.notify);
   const setNav = useAppStore((s) => s.setNav);
+  const agentDraft = useAppStore((s) => s.agentDraft);
+  const setAgentDraft = useAppStore((s) => s.setAgentDraft);
+
+  useEffect(() => {
+    if (surface !== "agent" || !agentDraft) return;
+    setInput(agentDraft);
+    setAgentDraft(null);
+  }, [agentDraft, setAgentDraft, surface]);
 
   const loadSessions = useCallback(async (selectId?: string) => {
     const list = await ipc.chatSessions(null);
@@ -168,9 +193,120 @@ export function ChatWorkspace({
   }, [active?.id]);
 
   useEffect(() => {
+    if (surface !== "agent") return;
+    let dispose = () => {};
+    void onHarnessEvent((event) => {
+      if (event.sessionId !== active?.id) return;
+      if (event.kind === "delta") {
+        setLive((items) => {
+          const next = [...(items ?? [])];
+          const last = next.at(-1);
+          if (last?.type === "text") next[next.length - 1] = { type: "text", text: last.text + event.text };
+          else next.push({ type: "text", text: event.text });
+          return next;
+        });
+      } else if (event.kind === "tool_start") {
+        const data = event.data ?? {};
+        setLive((items) => [
+          ...(items ?? []),
+          {
+            type: "tool",
+            trace: {
+              stepId: String(data.stepId),
+              seq: Number(data.seq ?? 0),
+              toolName: String(data.toolName ?? ""),
+              title: event.text,
+              input: data.input ?? {},
+              summary: "",
+              status: "running",
+              candidateIds: [],
+              action: null,
+            },
+          },
+        ]);
+      } else if (event.kind === "tool_end") {
+        const trace = event.data as HarnessToolTrace;
+        setLive((items) =>
+          (items ?? []).map((item) =>
+            item.type === "tool" && item.trace.stepId === trace.stepId ? { type: "tool", trace } : item,
+          ),
+        );
+      } else if (event.kind === "plan") {
+        setLivePlan(Array.isArray(event.data) ? (event.data as PlanItem[]) : []);
+      }
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => dispose();
+  }, [active?.id, surface]);
+
+  // 分层构建故事圣经耗时较长：把阶段进度挂到正在运行的工具行上。
+  useEffect(() => {
+    if (surface !== "agent") return;
+    let dispose = () => {};
+    void onBlueprintProgress((event) => {
+      setLive((items) =>
+        items
+          ? items.map((item) =>
+              item.type === "tool" && item.trace.toolName === "generate_blueprint" && item.trace.status === "running"
+                ? { type: "tool", trace: { ...item.trace, summary: `${event.label}（${event.step}/${event.total}）` } }
+                : item,
+            )
+          : items,
+      );
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => dispose();
+  }, [surface]);
+
+  useEffect(() => {
+    if (surface !== "agent") return;
+    void ipc
+      .harnessPaths()
+      .then(setPaths)
+      .catch(() => setPaths([]));
+  }, [surface, messages.length]);
+
+  const rememberTraces = useCallback((runId: string, traces: HarnessToolTrace[]) => {
+    setTracesByRun((current) => ({ ...current, [runId]: traces }));
+  }, []);
+
+  const describeCandidate = useCallback<CandidateDescriber>(
+    (id) => {
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) return null;
+      return {
+        label: candidateLabel(candidate.kind),
+        summary: summaryOf(candidate),
+        kind: candidate.kind,
+        risk: candidate.riskLevel,
+      };
+    },
+    [candidates],
+  );
+
+  const refreshAfterApproval = useCallback(async () => {
+    if (!active) return;
+    const pending = await ipc.chatCandidates(active.id);
+    setCandidates(pending.filter((candidate) => candidate.status === "pending"));
+    await refreshProject();
+    await onWorkflowComplete?.();
+  }, [active, onWorkflowComplete, refreshProject]);
+
+  const changeAgentMode = (mode: AgentMode) => {
+    setAgentMode(mode);
+    try {
+      window.localStorage.setItem("cw.agentMode", mode);
+    } catch {
+      // 偏好只是界面便利，存不下也不影响功能。
+    }
+  };
+
+  useEffect(() => {
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [messages, streaming]);
+  }, [messages, streaming, live]);
 
   const newSession = async () => {
     try {
@@ -215,6 +351,7 @@ export function ChatWorkspace({
       createdAt: new Date().toISOString(),
       linkedCandidateIds: [],
       pinned: false,
+      agentRunId: null,
     };
     setMessages((prev) => [...prev, temp]);
     try {
@@ -235,6 +372,59 @@ export function ChatWorkspace({
     } finally {
       setSending(false);
       requestRef.current = null;
+    }
+  };
+
+  const sendHarness = async (content: string) => {
+    if (!active || sending) return;
+    setInput("");
+    setSending(true);
+    setError(null);
+    setLive([]);
+    setLivePlan([]);
+    const temp: ChatMessage = {
+      id: `temp-${Date.now()}`,
+      sessionId: active.id,
+      seq: 999999,
+      role: "user",
+      content,
+      model: "",
+      tokens: 0,
+      createdAt: new Date().toISOString(),
+      linkedCandidateIds: [],
+      pinned: false,
+      agentRunId: null,
+    };
+    setMessages((prev) => [...prev, temp]);
+    try {
+      const result = await ipc.harnessSend(active.id, content, agentMode);
+      setTracesByRun((current) => ({ ...current, [result.runId]: result.traces }));
+      setMessages((prev) => [
+        ...prev.filter((message) => message.id !== temp.id),
+        result.userMessage,
+        result.assistantMessage,
+      ]);
+      setActive(result.session);
+      const pending = await ipc.chatCandidates(active.id);
+      setCandidates(pending.filter((candidate) => candidate.status === "pending"));
+      await loadSessions(active.id);
+      await refreshProject();
+      await onWorkflowComplete?.();
+      if (result.candidates.length > 0) {
+        notify(`Agent 提出了 ${result.candidates.length} 项候选，确认前不会改变权威资料`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message !== "已取消") setError(message);
+      try {
+        await loadActive(active);
+      } catch {
+        // 保留原始错误。
+      }
+    } finally {
+      setSending(false);
+      setLive(null);
+      setLivePlan([]);
     }
   };
 
@@ -329,17 +519,38 @@ export function ChatWorkspace({
     }
   };
 
+  // “下一步”建议：导航类直接跳转；其它都作为一句话交给 Agent，由它先问清再调用工具。
+  const runNextAction = async (action: AgentNextAction) => {
+    if (["review_candidates", "open_seed", "open_studio"].includes(action.action)) {
+      await runWorkflow(action.action, action.prompt);
+      return;
+    }
+    if (surface === "agent") {
+      await sendHarness(action.prompt);
+      return;
+    }
+    await runWorkflow(action.action, action.prompt);
+  };
+
   const send = async (preset?: string) => {
     const content = (preset ?? input).trim();
     const detected = surface === "agent" ? detectWorkflowAction(content) : null;
     if (detected) {
-      await runWorkflow(detected, content);
+      await runWorkflow(detected, content.replace(/^\/(灵感|蓝本|卷章|文笔)\s*/, ""));
+      return;
+    }
+    if (surface === "agent") {
+      if (content) await sendHarness(content);
       return;
     }
     await sendChat(preset);
   };
 
   const cancel = async () => {
+    if (surface === "agent" && active) {
+      await ipc.harnessCancel(active.id);
+      return;
+    }
     if (requestRef.current) await ipc.chatCancel(requestRef.current);
   };
 
@@ -378,6 +589,12 @@ export function ChatWorkspace({
   const acceptCandidate = async (id: string) => {
     if (!active) return;
     try {
+      const target = candidates.find((candidate) => candidate.id === id);
+      if (target && ["draft", "draft_refined"].includes(target.kind)) {
+        setNav("studio");
+        notify("正文草稿请在正文页对照原文后采用");
+        return;
+      }
       await ipc.candidateAccept(id);
       const pending = await ipc.chatCandidates(active.id);
       setCandidates(pending.filter((c) => c.status === "pending"));
@@ -472,11 +689,12 @@ export function ChatWorkspace({
 
   return (
     <div
-      className="grid grid-cols-[210px_minmax(0,1fr)_280px] gap-3"
-      style={{
-        height: surface === "agent" ? "calc(100vh - 318px)" : "calc(100vh - 245px)",
-        minHeight: surface === "agent" ? 490 : 520,
-      }}
+      className={`grid gap-3 ${
+        surface === "agent"
+          ? "workspace-fill min-h-[480px] grid-cols-[240px_minmax(0,1fr)_320px]"
+          : "grid-cols-[210px_minmax(0,1fr)_280px]"
+      }`}
+      style={surface === "agent" ? undefined : { height: "calc(100vh - 245px)", minHeight: 520 }}
     >
       <aside className="paper-card flex min-h-0 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
@@ -539,6 +757,9 @@ export function ChatWorkspace({
             <span className="max-w-[260px] truncate text-[12px] font-semibold text-ink">
               {active?.title ?? (surface === "agent" ? "Agent 对话" : "创作对话")}
             </span>
+            {surface === "agent" ? (
+              <ModeSwitch mode={agentMode} onChange={changeAgentMode} />
+            ) : (
             <div className="flex rounded-full border border-line p-0.5">
               {modes.map((mode) => (
                 <button
@@ -554,6 +775,7 @@ export function ChatWorkspace({
                 </button>
               ))}
             </div>
+            )}
           </div>
           {premise ? (
             <Badge tone={premise.status === "confirmed" ? "teal" : "amber"}>
@@ -578,7 +800,7 @@ export function ChatWorkspace({
                 {nextActions.slice(0, 3).map((action, index) => (
                   <button
                     key={action.key}
-                    onClick={() => void runWorkflow(action.action, action.prompt)}
+                    onClick={() => void runNextAction(action)}
                     disabled={Boolean(workflowBusy) || sending}
                     className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[9.5px] transition disabled:opacity-50 ${
                       index === 0
@@ -606,17 +828,19 @@ export function ChatWorkspace({
                 <CornerDownLeft size={16} />
               </div>
               <div className="display text-[18px] text-ink">
-                {surface === "agent" ? "描述目标，助手会结合现有会话与候选工作" : "对话只产出建议，不直接成为事实"}
+                {surface === "agent" ? "把任务交给 Agent，它会先读资料再提出候选" : "对话只产出建议，不直接成为事实"}
               </div>
               <p className="mt-2 max-w-md text-[11.5px] leading-6 text-muted">
-                讨论人物、规则或章节目标。AI 消息可以“采纳为”候选，确认后才进入正式表。
+                {surface === "agent"
+                  ? "Agent 可以浏览人物、章节、伏笔与线程，检索原文，诊断章节工艺，并把修改整理成候选。用 @ 引用资料，确认权始终在你手里。"
+                  : "讨论人物、规则或章节目标。AI 消息可以“采纳为”候选，确认后才进入正式表。"}
               </p>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 {(surface === "agent"
                   ? [
-                      "结合现有设定，列出下一阶段最需要补的三块资料。",
-                      "哪些人物关系和伏笔正在形成叙事债务？",
-                      "根据当前结构给出下一卷的推进方案。",
+                      "看看项目现在处在哪个阶段，最该补的三件事是什么？",
+                      "检查所有章节的价值转变和章末钩子，提出修订候选。",
+                      "扫描已有正文，把人物、地点和伏笔整理成带原文证据的候选。",
                     ]
                   : [
                       "这个主角最大的秘密会怎样反噬他？",
@@ -636,20 +860,28 @@ export function ChatWorkspace({
             </div>
           ) : (
             <div className="space-y-5">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <MessageBubble
                   key={message.id}
                   message={message}
                   onCapture={(kind) => void capture(message, kind)}
+                  traces={message.agentRunId ? tracesByRun[message.agentRunId] : undefined}
+                  onTraces={rememberTraces}
+                  actionsEnabled={index === messages.length - 1 && !sending && !workflowBusy}
+                  onAnswer={(text) => void send(text)}
+                  describe={describeCandidate}
+                  onChanged={refreshAfterApproval}
+                  onNavigate={(target) => setNav(target)}
                 />
               ))}
+              {live ? <LiveRun items={live} plan={livePlan} /> : null}
               {streaming ? (
                 <div className="flex gap-3">
                   <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal text-[9px] font-semibold text-paper-raised">
                     AI
                   </div>
-                  <div className="max-w-[86%] rounded-xl rounded-tl-sm border border-line bg-paper-raised px-4 py-3 text-[12px] leading-6 whitespace-pre-wrap text-ink-soft">
-                    {streaming}
+                  <div className="max-w-[86%] rounded-xl rounded-tl-sm border border-line bg-paper-raised px-4 py-3 text-[12px] leading-6 text-ink-soft">
+                    <Markdown>{streaming}</Markdown>
                     <span className="ml-1 inline-block h-3 w-0.5 animate-pulse bg-teal align-middle" />
                   </div>
                 </div>
@@ -682,9 +914,7 @@ export function ChatWorkspace({
                   {label}
                 </button>
               ))}
-              <span className="ml-auto text-[9px] text-muted">
-                也可以直接说“生成卷章骨架”或输入 /文笔
-              </span>
+
             </div>
           ) : null}
           {active?.mode === "plot" || beats.length > 0 ? (
@@ -735,8 +965,15 @@ export function ChatWorkspace({
           ) : null}
           {error ? <div className="mb-2 text-[11px] leading-5 text-coral">{error}</div> : null}
           <div className="relative">
+            {surface === "agent" && mentionQuery(input) !== null ? (
+              <MentionList
+                query={mentionQuery(input) ?? "/"}
+                paths={paths}
+                onPick={(path) => setInput((value) => value.replace(/@(\/[^\s@]*)?$/, `@${path} `))}
+              />
+            ) : null}
             <Textarea
-              rows={3}
+              rows={surface === "agent" ? 2 : 3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -745,7 +982,11 @@ export function ChatWorkspace({
                   void send();
                 }
               }}
-              placeholder="继续讨论，或让 AI 推演下一场…（Enter 发送，Shift+Enter 换行）"
+              placeholder={
+                surface === "agent"
+                  ? "交给 Agent 的任务…  @ 引用资料，/蓝本 /卷章 启动工作流（Enter 发送）"
+                  : "继续讨论，或让 AI 推演下一场…（Enter 发送，Shift+Enter 换行）"
+              }
               disabled={sending}
               className="pr-24"
             />
@@ -767,9 +1008,19 @@ export function ChatWorkspace({
             </div>
           </div>
           <div className="mt-2 flex items-center gap-3 text-[9.5px] text-muted">
-            <span>对话不会自动写入正文或权威库</span>
-            <span className="h-0.5 w-0.5 rounded-full bg-muted/50" />
-            <span>超过 12 轮建议先写第一场或生成骨架</span>
+            <span>
+              {surface === "agent"
+                ? agentMode === "plan"
+                  ? "规划：只读分析"
+                  : "执笔：写入只进候选区"
+                : "对话不会自动写入正文或权威库"}
+            </span>
+            {surface === "agent" ? null : (
+              <>
+                <span className="h-0.5 w-0.5 rounded-full bg-muted/50" />
+                <span>超过 12 轮建议先写第一场或生成骨架</span>
+              </>
+            )}
             <span className="ml-auto flex items-center gap-1.5">
               <select
                 value={chapterId}
@@ -860,9 +1111,23 @@ export function ChatWorkspace({
 function MessageBubble({
   message,
   onCapture,
+  traces,
+  onTraces,
+  actionsEnabled,
+  onAnswer,
+  describe,
+  onChanged,
+  onNavigate,
 }: {
   message: ChatMessage;
   onCapture: (kind: string) => void;
+  traces?: HarnessToolTrace[];
+  onTraces: (runId: string, traces: HarnessToolTrace[]) => void;
+  actionsEnabled: boolean;
+  onAnswer: (text: string) => void;
+  describe: CandidateDescriber;
+  onChanged: () => void | Promise<void>;
+  onNavigate: (target: "seed" | "studio") => void;
 }) {
   if (message.role === "user") {
     return (
@@ -876,13 +1141,24 @@ function MessageBubble({
   if (message.role === "system") return null;
   return (
     <div className="group flex gap-3">
-      <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal text-[9px] font-semibold text-paper-raised">
-        AI
-      </div>
+      <AgentAvatar />
       <div className="max-w-[86%]">
-        <div className="rounded-xl rounded-tl-sm border border-line bg-paper-raised px-4 py-3 text-[12px] leading-6 whitespace-pre-wrap text-ink-soft">
-          {message.content}
+        {message.agentRunId ? (
+          <RunTrace runId={message.agentRunId} cached={traces} onLoaded={onTraces} />
+        ) : null}
+        <div className="rounded-xl rounded-tl-sm border border-line bg-paper-raised px-4 py-3 text-[12px] leading-6 text-ink-soft">
+          <Markdown>{message.content}</Markdown>
         </div>
+        {traces ? (
+          <ActionCards
+            actions={actionsFromTraces(traces)}
+            disabled={!actionsEnabled}
+            onAnswer={onAnswer}
+            describe={describe}
+            onChanged={onChanged}
+            onNavigate={onNavigate}
+          />
+        ) : null}
         <div className="mt-1.5 flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -956,6 +1232,12 @@ function candidateLabel(kind: string) {
       style_sample: "文笔样本",
       style_profile: "文笔档案",
       scene_goal: "章节目标",
+      knowledge_entry: "知识条目",
+      outline_patch: "大纲节点",
+      craft_patch: "章节工艺卡",
+      story_thread: "叙事线程",
+      project_guide: "作者守则",
+      draft: "正文草稿",
     }[kind] ?? kind
   );
 }
@@ -985,8 +1267,38 @@ export function summaryOf(candidate: Candidate): string {
       p.goal ?? "",
     ).slice(0, 60)}`;
   }
+  if (candidate.kind === "craft_patch") {
+    const changes = Object.entries(p.changes ?? {})
+      .map(([key, value]) => `${craftFieldLabel(key)}：${String(value)}`)
+      .join("；");
+    return `第 ${p.chapter ?? "?"} 章 · ${changes}`.slice(0, 120);
+  }
+  if (candidate.kind === "story_thread") {
+    return `${p.title ?? "线程"}：${String(p.question ?? "").slice(0, 60)}`;
+  }
+  if (candidate.kind === "project_guide") {
+    return `守则修订：${String(p.content ?? "").slice(0, 80)}`;
+  }
+  if (candidate.kind === "draft") {
+    return `第 ${p.chapterNumber ?? "?"} 章草稿 · ${p.wordCount ?? 0} 字：${String(p.excerpt ?? p.text ?? "").slice(0, 60)}`;
+  }
   if (candidate.kind === "style_profile") {
     return `${p.name ?? "文笔档案"}：${String(p.agentReason ?? "等待作者确认具体文笔参数。").slice(0, 80)}`;
   }
   return String(p.text ?? p.description ?? p.title ?? "候选内容").slice(0, 90);
+}
+
+function craftFieldLabel(key: string): string {
+  return (
+    {
+      valueShift: "价值转变",
+      crisis: "危机",
+      hook: "钩子",
+      reveal: "揭示",
+      goal: "目标",
+      conflict: "冲突",
+      turn: "转折",
+      payoff: "兑现",
+    }[key] ?? key
+  );
 }

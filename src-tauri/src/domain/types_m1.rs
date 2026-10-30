@@ -113,6 +113,7 @@ pub struct ChatMessage {
     pub created_at: String,
     pub linked_candidate_ids: Vec<String>,
     pub pinned: bool,
+    pub agent_run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -232,6 +233,10 @@ pub struct OutlineNode {
     pub logic_node_ids: Vec<String>,
     pub presentation_mode: String,
     pub narrative_function: String,
+    pub value_shift: String,
+    pub crisis: String,
+    pub hook: String,
+    pub reveal: String,
     pub status: String,
     pub branch_id: Option<String>,
     pub source: String,
@@ -248,6 +253,14 @@ pub struct OutlineUpdateInput {
     pub conflict: String,
     pub turn: String,
     pub payoff: String,
+    #[serde(default)]
+    pub value_shift: Option<String>,
+    #[serde(default)]
+    pub crisis: Option<String>,
+    #[serde(default)]
+    pub hook: Option<String>,
+    #[serde(default)]
+    pub reveal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

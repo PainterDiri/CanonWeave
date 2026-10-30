@@ -263,7 +263,7 @@ export function AuditPage() {
   ];
 
   return (
-    <div className="fade-in mx-auto max-w-[1180px] px-8 py-7">
+    <div className="fade-in workspace-page px-8 py-7">
       <SectionTitle
         eyebrow="Audit"
         title="一致性审计"
@@ -385,7 +385,7 @@ export function AuditPage() {
                   </div>
                   {issue.solverCore.length ? (
                     <div className="mt-2 flex flex-wrap items-center gap-1">
-                      <span className="text-[9px] font-medium text-coral">Z3 unsat core</span>
+                      <span className="text-[9px] font-medium text-coral">冲突核心</span>
                       {issue.solverCore.map((item) => (
                         <span
                           key={item}
@@ -435,8 +435,8 @@ export function AuditPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-[340px_minmax(0,1fr)] gap-4">
-          <section className="paper-card flex h-[560px] min-h-0 flex-col overflow-hidden">
+        <div className="workspace-fill grid min-h-[520px] grid-cols-[360px_minmax(0,1fr)] gap-4">
+          <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
               <span className="text-[11px] font-semibold text-ink-soft">
                 待确认 {filtered.length}
@@ -483,7 +483,7 @@ export function AuditPage() {
           </section>
 
           {current ? (
-            <section className="paper-card flex h-[560px] min-h-0 flex-col overflow-hidden">
+            <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
               <div className="flex items-start justify-between border-b border-line px-5 py-4">
                 <div>
                   <div className="flex items-center gap-2">

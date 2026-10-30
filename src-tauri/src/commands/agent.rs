@@ -373,12 +373,11 @@ pub async fn agent_style_proposal(
     session_id: String,
     instruction: String,
 ) -> IpcResult<StyleRecommendation> {
-    let instruction = instruction.trim();
+    let instruction = instruction.trim().to_string();
     if instruction.is_empty() {
         return Err("请说明你希望的文笔方向".into());
     }
-    let client = super::seed::require_client(&state).map_err(|error| error.to_string())?;
-    let (project_id, premise, blueprint, presets) = {
+    let project_id = {
         let guard = state
             .project
             .lock()
@@ -386,6 +385,85 @@ pub async fn agent_style_proposal(
         let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         chat::get(&loaded.conn, &loaded.summary.id, &session_id)
             .map_err(|error| error.to_string())?;
+        chat::append_message(
+            &loaded.conn,
+            &loaded.summary.id,
+            &session_id,
+            "user",
+            &instruction,
+            "",
+        )
+        .map_err(|error| error.to_string())?;
+        loaded.summary.id.clone()
+    };
+    let proposal = style_candidate_for(&state, &instruction, &format!("agent:style:{session_id}")).await?;
+    let assistant_text = format!(
+        "我建议采用「{}」文笔方案。\n\n{}\n\n已生成待确认的文笔档案候选；确认前不会用于任何正文生成。",
+        proposal.preset_name, proposal.reason
+    );
+    let guard = state
+        .project
+        .lock()
+        .map_err(|_| "项目状态锁已损坏".to_string())?;
+    let loaded = guard.as_ref().ok_or("尚未打开项目")?;
+    let message = chat::append_message(
+        &loaded.conn,
+        &project_id,
+        &session_id,
+        "assistant",
+        &assistant_text,
+        &proposal.model,
+    )
+    .map_err(|error| error.to_string())?;
+    loaded
+        .conn
+        .execute(
+            "UPDATE candidate SET source_message_id=?2 WHERE id=?1",
+            rusqlite::params![proposal.candidate.id, message.id],
+        )
+        .map_err(|error| error.to_string())?;
+    loaded
+        .conn
+        .execute(
+            "UPDATE chat_message SET linked_candidate_ids=?2 WHERE id=?1",
+            rusqlite::params![
+                message.id,
+                serde_json::to_string(&[proposal.candidate.id.clone()]).unwrap()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let candidate = candidates::get(&loaded.conn, &project_id, &proposal.candidate.id)
+        .map_err(|error| error.to_string())?;
+    Ok(StyleRecommendation {
+        preset_id: proposal.preset_id,
+        preset_name: proposal.preset_name,
+        reason: proposal.reason,
+        message,
+        candidate,
+    })
+}
+
+pub struct StyleProposal {
+    pub preset_id: String,
+    pub preset_name: String,
+    pub reason: String,
+    pub model: String,
+    pub candidate: crate::domain::Candidate,
+}
+
+/// 从预设中选出最匹配的文笔方案，写入 style_profile 候选。不追加会话消息，供 Agent harness 复用。
+pub async fn style_candidate_for(
+    state: &State<'_, AppState>,
+    instruction: &str,
+    source_span: &str,
+) -> IpcResult<StyleProposal> {
+    let client = super::seed::require_client(state).map_err(|error| error.to_string())?;
+    let (project_id, premise, blueprint, presets) = {
+        let guard = state
+            .project
+            .lock()
+            .map_err(|_| "项目状态锁已损坏".to_string())?;
+        let loaded = guard.as_ref().ok_or("尚未打开项目")?;
         let premise =
             seed::active(&loaded.conn, &loaded.summary.id).map_err(|error| error.to_string())?;
         let blueprint = match crate::blueprint::current(&loaded.conn, &loaded.summary.id)
@@ -396,15 +474,6 @@ pub async fn agent_style_proposal(
                 .map_err(|error| error.to_string())?,
         };
         let presets = crate::style::presets().to_vec();
-        chat::append_message(
-            &loaded.conn,
-            &loaded.summary.id,
-            &session_id,
-            "user",
-            instruction,
-            "",
-        )
-        .map_err(|error| error.to_string())?;
         (
             loaded.summary.id.clone(),
             premise.map(|value| serde_json::to_value(value)).transpose(),
@@ -515,54 +584,31 @@ pub async fn agent_style_proposal(
         ratios: preset.ratios.clone(),
         anti_style: preset.anti_style.clone(),
     };
-    let assistant_text = format!(
-        "我建议采用「{}」文笔方案。\n\n{}\n\n已生成待确认的文笔档案候选；确认前不会用于任何正文生成。",
-        preset.name, reason
-    );
-    let guard = state
-        .project
-        .lock()
-        .map_err(|_| "项目状态锁已损坏".to_string())?;
-    let loaded = guard.as_ref().ok_or("尚未打开项目")?;
-    let message = chat::append_message(
-        &loaded.conn,
-        &project_id,
-        &session_id,
-        "assistant",
-        &assistant_text,
-        &client.model,
-    )
-    .map_err(|error| error.to_string())?;
     let mut payload = serde_json::to_value(&profile).map_err(|error| error.to_string())?;
     if let Some(object) = payload.as_object_mut() {
         object.insert("presetId".into(), Value::String(preset.id.clone()));
         object.insert("agentReason".into(), Value::String(reason.clone()));
     }
+    let guard = state
+        .project
+        .lock()
+        .map_err(|_| "项目状态锁已损坏".to_string())?;
+    let loaded = guard.as_ref().ok_or("尚未打开项目")?;
     let candidate = candidates::insert(
         &loaded.conn,
         &project_id,
         "style_profile",
         payload,
-        Some(&format!("agent:style:{session_id}")),
-        Some(&message.id),
+        Some(source_span),
+        None,
         0.8,
     )
     .map_err(|error| error.to_string())?;
-    loaded
-        .conn
-        .execute(
-            "UPDATE chat_message SET linked_candidate_ids=?2 WHERE id=?1",
-            rusqlite::params![
-                message.id,
-                serde_json::to_string(&[candidate.id.clone()]).unwrap()
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(StyleRecommendation {
+    Ok(StyleProposal {
         preset_id: preset.id.clone(),
         preset_name: preset.name.clone(),
         reason,
-        message,
+        model: client.model.clone(),
         candidate,
     })
 }

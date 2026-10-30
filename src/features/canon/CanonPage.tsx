@@ -9,6 +9,7 @@ import {
   Paintbrush,
   Plug,
   RefreshCw,
+  ScrollText,
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
@@ -26,16 +27,23 @@ import {
 import { StylePage } from "@/features/style/StylePage";
 import { useAppStore } from "@/stores/ui";
 
-type Tab = "model" | "import" | "style" | "rules" | "export";
+type Tab = "guide" | "model" | "import" | "style" | "rules" | "export";
 
 export function CanonPage({ model }: { model: ModelConfig | null }) {
-  const [tab, setTab] = useState<Tab>("model");
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#guide") {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return "guide";
+    }
+    return "model";
+  });
   return (
     <div className="fade-in mx-auto max-w-[1060px] px-8 py-7">
       <SectionTitle eyebrow="Canon · 设定" title="设定与项目配置" />
       <div className="mb-5 flex items-center gap-1 border-b border-line">
         {[
           { key: "model" as const, label: "模型", icon: Plug },
+          { key: "guide" as const, label: "作者守则", icon: ScrollText },
           { key: "import" as const, label: "旧稿导入", icon: FileText },
           { key: "style" as const, label: "文笔", icon: Paintbrush },
           { key: "rules" as const, label: "规则", icon: ShieldAlert },
@@ -53,13 +61,14 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
               <Icon size={14} />
               {item.label}
               {tab === item.key ? (
-                <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-teal" />
+                <span className="tab-thread" aria-hidden />
               ) : null}
             </button>
           );
         })}
       </div>
       {tab === "model" ? <ModelPanel model={model} /> : null}
+      {tab === "guide" ? <GuidePanel /> : null}
       {tab === "import" ? <ImportPanel /> : null}
       {tab === "style" ? <StylePage /> : null}
       {tab === "rules" ? (
@@ -67,6 +76,103 @@ export function CanonPage({ model }: { model: ModelConfig | null }) {
       ) : null}
       {tab === "export" ? <ExportPanel /> : null}
     </div>
+  );
+}
+
+const guideTemplate = `视角纪律：
+- 第三人称限知，只跟随主角；不写其他角色的内心独白。
+
+禁写内容：
+- 不写穿越与系统面板；不用现实品牌名。
+
+命名与称谓：
+- 主角在叙述中称名不称姓；长辈对其称小名。
+
+文风红线：
+- 不做总结式抒情，情绪用动作与感官呈现。`;
+
+function GuidePanel() {
+  const notify = useAppStore((s) => s.notify);
+  const setNav = useAppStore((s) => s.setNav);
+  const setAgentDraft = useAppStore((s) => s.setAgentDraft);
+  const [content, setContent] = useState("");
+  const [saved, setSaved] = useState("");
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void ipc
+      .projectGuide()
+      .then((guide) => {
+        setContent(guide?.content ?? "");
+        setSaved(guide?.content ?? "");
+        setUpdatedAt(guide?.updatedAt ?? null);
+      })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const guide = await ipc.projectGuideSave(content);
+      setSaved(guide.content);
+      setContent(guide.content);
+      setUpdatedAt(guide.updatedAt);
+      notify("作者守则已保存，Agent 下一轮起生效");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dirty = content !== saved;
+  return (
+    <section className="paper-card max-w-[820px] p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="display text-[19px] text-ink">作者守则</h2>
+          <p className="mt-1.5 max-w-xl text-[12px] leading-6 text-muted">
+            写给 Agent 的长期规则：每次对话、规划和起草都会先读这里。它约束“怎么写”，不是世界事实；设定请放进人物与知识库。
+          </p>
+        </div>
+        <Button
+          size="sm"
+          onClick={() => {
+            setAgentDraft("根据种子卡和已确认设定，起草一份作者守则：视角纪律、禁写内容、命名约定和文风红线，各 2 至 4 条，用 propose_guide 提交候选。");
+            setNav("agent");
+          }}
+        >
+          让 Agent 起草
+        </Button>
+      </div>
+      <textarea
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        placeholder={guideTemplate}
+        rows={16}
+        className="focus-ring mt-4 w-full resize-y rounded-xl border border-line-strong bg-paper-raised px-4 py-3 text-[13px] leading-7 text-ink placeholder:text-muted/60"
+      />
+      <div className="mt-3 flex items-center justify-between text-[11px] text-muted">
+        <span>
+          {content.length} 字
+          {updatedAt ? ` · 上次保存 ${new Date(updatedAt).toLocaleString()}` : " · 尚未保存"}
+        </span>
+        <div className="flex items-center gap-2">
+          {!content.trim() ? (
+            <Button size="sm" tone="ghost" onClick={() => setContent(guideTemplate)}>
+              使用模板
+            </Button>
+          ) : null}
+          <Button size="sm" tone="primary" onClick={() => void save()} disabled={busy || !dirty}>
+            {dirty ? "保存守则" : "已保存"}
+          </Button>
+        </div>
+      </div>
+      {error ? <div className="mt-2 text-[11px] text-coral">{error}</div> : null}
+    </section>
   );
 }
 
@@ -190,7 +296,7 @@ function RulesPanel() {
             规则编译器
           </div>
           <p className="mt-1.5 max-w-2xl text-[11.5px] leading-6 text-muted">
-            普通规则走 SQL 快速检查；时间、地点、物品与排他条件交给 Z3，返回的 unsat core 会映射回事实和原文证据。
+            普通规则走 SQL 快速检查；时间先后、同时两地、物品生命周期等硬约束交给内置时间约束求解器，冲突核心会映射回事实和原文证据。
           </p>
         </div>
         <Button size="sm" tone="primary" onClick={() => void run()}>

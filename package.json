@@ -12,7 +12,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "clean": "bash scripts/clean.sh",
+    "clean:all": "bash scripts/clean.sh --all"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.4",
@@ -30,6 +32,7 @@
     "codemirror": "^6.0.2",
     "cytoscape": "^3.33.1",
     "lucide-react": "^0.468.0",
+    "markdown-to-jsx": "^7.7.17",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zustand": "^5.0.8"

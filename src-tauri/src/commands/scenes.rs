@@ -162,6 +162,31 @@ fn accept_draft(
         .and_then(|value| value.get("blocked"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    if let Some(target) = candidate.payload.get("chapterId").and_then(|v| v.as_str()) {
+        if target != chapter_id {
+            return Err(format!(
+                "该草稿属于第 {} 章，请切换到对应章节后再采用",
+                candidate
+                    .payload
+                    .get("chapterNumber")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or_default()
+            ));
+        }
+    }
+    if let Some(base) = candidate.payload.get("baseRevisionId") {
+        let current: Option<String> = loaded
+            .conn
+            .query_row(
+                "SELECT current_revision_id FROM chapter WHERE project_id=?1 AND id=?2",
+                params![loaded.summary.id, chapter_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if base.as_str().map(str::to_string) != current {
+            return Err("正文在草稿生成后已被修改；为避免覆盖作者修改，请重新起草或手动合并".into());
+        }
+    }
     if use_refined && blocked && !acknowledge_fact_changes {
         return Err("精修版本检测到硬事实变化，必须选择原文或明确确认修改".into());
     }

@@ -177,6 +177,40 @@ pub async fn seed_generate(
     Ok(SeedGenerateResult { directions: cards })
 }
 
+/// Agent harness 调用：生成三个方向并写入种子卡候选，不往会话里追加消息。
+pub async fn generate_seed_cards(
+    state: &State<'_, AppState>,
+    logline: &str,
+    source_message_id: Option<&str>,
+) -> IpcResult<Vec<Premise>> {
+    let logline = logline.trim();
+    if logline.chars().count() < 4 {
+        return Err("请至少写一个具体的画面或冲突".into());
+    }
+    let client = client(state)?;
+    let current_premise = {
+        let guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
+        let loaded = guard.as_ref().ok_or("尚未打开项目")?;
+        seed::list(&loaded.conn, &loaded.summary.id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|e| e.to_string())?
+    };
+    let raw = generate_directions(&client, logline, current_premise.as_ref()).await?;
+    let directions: Vec<Value> = parse_json_loose(&raw).map_err(|e| e.to_string())?;
+    let mut guard = state.project.lock().map_err(|_| "项目状态锁已损坏")?;
+    let loaded = guard.as_mut().ok_or("尚未打开项目")?;
+    let cards = seed::insert_directions(&mut loaded.conn, &loaded.summary.id, &directions, source_message_id)
+        .map_err(|e| e.to_string())?;
+    if cards.is_empty() {
+        return Err("模型返回的走向缺少一句话故事，请重试".into());
+    }
+    Ok(cards)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn premise_list(state: State<'_, AppState>) -> IpcResult<Vec<Premise>> {

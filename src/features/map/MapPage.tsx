@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { useCallback, useEffect, useRef, useState } from "react";
 import cytoscape from "cytoscape";
 import {
@@ -156,7 +157,7 @@ export function MapPage() {
               <Icon size={14} />
               {item.label}
               {tab === item.key ? (
-                <span className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-teal" />
+                <span className="tab-thread" aria-hidden />
               ) : null}
             </button>
           );
@@ -256,9 +257,7 @@ export function MapPage() {
                     {insight.retrievalMode === "hybrid" ? "混合子图检索" : "FTS + PPR"}
                   </Badge>
                 </div>
-                <p className="mt-2 whitespace-pre-wrap text-[12px] leading-7 text-ink-soft">
-                  {insight.answer}
-                </p>
+                <Markdown className="mt-2 text-[12px] leading-7 text-ink-soft">{insight.answer}</Markdown>
                 {insight.embeddingError ? (
                   <div className="mt-3 rounded-lg bg-amber-soft/40 px-3 py-2 text-[9.5px] leading-5 text-amber">
                     查询向量不可用，已降级：{insight.embeddingError}
@@ -497,9 +496,9 @@ function GraphView({
         {
           selector: "node",
           style: {
-            "background-color": "#114b45",
+            "background-color": "#2f5e3f",
             label: "data(label)",
-            color: "#23241f",
+            color: "#20271f",
             "font-size": "11px",
             "text-valign": "bottom",
             "text-margin-y": 5,
@@ -509,24 +508,24 @@ function GraphView({
         },
         {
           selector: 'node[kind = "place"]',
-          style: { "background-color": "#b8862e" },
+          style: { "background-color": "#8a5c0c" },
         },
         {
           selector: 'node[kind = "item"]',
-          style: { "background-color": "#d9604a" },
+          style: { "background-color": "#a9452a" },
         },
         {
           selector: "edge",
           style: {
             width: 1,
-            "line-color": "#c9c0ae",
+            "line-color": "#b9c9ac",
             "target-arrow-shape": "none",
             label: "data(label)",
             "font-size": "9px",
-            "text-background-color": "#f3efe6",
+            "text-background-color": "#f3efe2",
             "text-background-opacity": 0.9,
             "text-background-padding": "2px",
-            color: "#767368",
+            color: "#5f6a5a",
           },
         },
       ],

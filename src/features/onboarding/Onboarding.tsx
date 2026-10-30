@@ -1,3 +1,5 @@
+import leafSprig from "@/assets/leaf-sprig.png";
+import { BrandMark } from "@/components/BrandMark";
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -134,15 +136,13 @@ export function Onboarding({ model, onProject, onModel }: Props) {
     <div className="flex h-full min-h-0">
       <aside className="relative hidden w-[46%] min-w-[480px] flex-col justify-between overflow-hidden border-r border-line px-14 pb-12 pt-16 lg:flex">
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.55]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 78% 18%, rgba(17,75,69,0.12), transparent 32%), radial-gradient(circle at 18% 86%, rgba(217,96,74,0.08), transparent 34%)",
-          }}
+          aria-hidden
+          className="pointer-events-none absolute -right-10 bottom-[-40px] h-[560px] w-[372px] bg-contain bg-no-repeat opacity-80"
+          style={{ backgroundImage: `url(${leafSprig})` }}
         />
         <div className="relative">
           <div className="mb-16 flex items-center gap-3">
-            <BrandMark />
+            <BrandMark size={40} />
             <div>
               <div className="text-[15px] font-semibold tracking-wide text-ink">CanonWeave</div>
               <div className="text-[11px] tracking-[0.2em] text-muted">叙事织网</div>
@@ -163,9 +163,7 @@ export function Onboarding({ model, onProject, onModel }: Props) {
               ["可控文笔", "项目级文笔档案，快速与精修双通道"],
             ].map(([title, body], index) => (
               <div key={title} className="flex gap-4">
-                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-teal/25 text-[11px] font-semibold text-teal">
-                  {index + 1}
-                </div>
+                <div className="mt-2 h-2 w-2 shrink-0 rotate-45 rounded-[1px_6px] bg-silk" aria-hidden data-index={index} />
                 <div>
                   <div className="text-[13px] font-medium text-ink">{title}</div>
                   <div className="mt-0.5 text-[12px] leading-6 text-muted">{body}</div>
@@ -183,9 +181,6 @@ export function Onboarding({ model, onProject, onModel }: Props) {
         <div className="fade-in w-full max-w-[540px]">
           <div className="mb-7 flex items-center justify-between">
             <div>
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-teal">
-                Workspace
-              </div>
               <h2 className="display text-[26px] text-ink">
                 {tab === "create" ? "建立你的故事工作台" : "打开已有项目"}
               </h2>
@@ -351,28 +346,6 @@ export function Onboarding({ model, onProject, onModel }: Props) {
           </p>
         </div>
       </main>
-    </div>
-  );
-}
-
-function BrandMark() {
-  return (
-    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal shadow-[0_6px_16px_rgba(17,75,69,0.24)]">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M7 16.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5"
-          stroke="#F3EFE6"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-        <path
-          d="M17 7.5c0 2.5-2 4.5-4.5 4.5S8 10 8 7.5"
-          stroke="#D9A441"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-        <circle cx="12" cy="12" r="1.6" fill="#E2725B" />
-      </svg>
     </div>
   );
 }

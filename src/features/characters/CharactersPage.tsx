@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderCircle, Plus, Sparkles, UserRound } from "lucide-react";
 import { Badge, Button, EmptyState, Field, Input, Modal, SectionTitle, Textarea } from "@/components/ui";
@@ -110,7 +111,7 @@ export function CharactersPage() {
   };
 
   return (
-    <div className="fade-in mx-auto max-w-[1180px] px-8 py-7">
+    <div className="fade-in workspace-page px-8 py-7">
       <SectionTitle
         eyebrow="Characters"
         title="人物"
@@ -142,8 +143,8 @@ export function CharactersPage() {
           }
         />
       ) : (
-        <div className="grid grid-cols-[300px_minmax(0,1fr)] gap-4">
-          <section className="paper-card flex h-[560px] min-h-0 flex-col overflow-hidden">
+        <div className="workspace-fill grid grid-cols-[320px_minmax(0,1fr)] gap-4">
+          <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
             <div className="border-b border-line px-4 py-2.5 text-[11px] font-semibold text-ink-soft">
               人物 {characters.length}
             </div>
@@ -181,7 +182,7 @@ export function CharactersPage() {
           </section>
 
           {current ? (
-            <section className="paper-card flex h-[560px] min-h-0 flex-col overflow-hidden">
+            <section className="paper-card flex h-full min-h-0 flex-col overflow-hidden">
               <div className="flex items-start justify-between border-b border-line px-6 py-5">
                 <div>
                   <div className="flex items-center gap-2">
@@ -199,9 +200,9 @@ export function CharactersPage() {
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-                <p className="mb-5 text-[12px] leading-6 text-ink-soft">
+                <Markdown className="mb-5 text-[12px] leading-6 text-ink-soft">
                   {current.entity.description || "还没有人物描述。"}
-                </p>
+                </Markdown>
                 <div className="grid grid-cols-3 gap-3">
                   {[
                     ["欲望", current.desire],
@@ -214,7 +215,7 @@ export function CharactersPage() {
                     <div key={label} className="rounded-xl border border-line bg-paper/60 p-3.5">
                       <div className="text-[9.5px] tracking-wide text-muted">{label}</div>
                       <div className="mt-1.5 text-[11.5px] leading-5 text-ink-soft">
-                        {value || <span className="text-muted/60">未设定</span>}
+                        {value ? <Markdown>{value}</Markdown> : <span className="text-muted/60">未设定</span>}
                       </div>
                     </div>
                   ))}
@@ -224,9 +225,9 @@ export function CharactersPage() {
                     <Sparkles size={10} className="text-amber" />
                     声音锚点 · 作者认可的样本
                   </div>
-                  <p className="text-[11.5px] leading-6 whitespace-pre-wrap text-ink-soft">
+                  <Markdown className="text-[11.5px] leading-6 text-ink-soft">
                     {current.voiceAnchor || "还没有样本。之后贴入 3 至 8 段作者认可的对话，用于声音漂移检查。"}
-                  </p>
+                  </Markdown>
                 </div>
                 <VoicePanel characterId={current.entity.id} />
                 {current.values.length ? (

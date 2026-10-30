@@ -326,6 +326,12 @@ async fn generate_chapter_batch(
                 logic_node_ids: value_string_list(&row, "logicNodeIds"),
                 presentation_mode: value_string(&row, "presentationMode"),
                 narrative_function: value_string(&row, "narrativeFunction"),
+                craft: crate::outline::ChapterCraft {
+                    value_shift: value_string(&row, "valueShift"),
+                    crisis: value_string(&row, "crisis"),
+                    hook: value_string(&row, "hook"),
+                    reveal: value_string(&row, "reveal"),
+                },
             }
         })
         .collect())

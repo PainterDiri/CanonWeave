@@ -205,6 +205,17 @@ export const commands = {
 	embeddingIndex: (rebuild: boolean) => typedError<EmbeddingIndexResult, string>(__TAURI_INVOKE("embedding_index", { rebuild })),
 	embeddingCancelIndex: () => typedError<null, string>(__TAURI_INVOKE("embedding_cancel_index")),
 	hybridSearch: (query: string, limit: number | null) => typedError<HybridSearchResult, string>(__TAURI_INVOKE("hybrid_search", { query, limit })),
+	harnessSend: (sessionId: string, content: string, mode: string) => typedError<HarnessTurnResult, string>(__TAURI_INVOKE("harness_send", { sessionId, content, mode })),
+	harnessCancel: (sessionId: string) => typedError<boolean, string>(__TAURI_INVOKE("harness_cancel", { sessionId })),
+	harnessTraces: (runId: string) => typedError<HarnessToolTrace[], string>(__TAURI_INVOKE("harness_traces", { runId })),
+	harnessPaths: () => typedError<string[], string>(__TAURI_INVOKE("harness_paths")),
+	projectGuideGet: () => typedError<ProjectGuide, string>(__TAURI_INVOKE("project_guide_get")),
+	projectGuideSave: (content: string) => typedError<ProjectGuide, string>(__TAURI_INVOKE("project_guide_save", { content })),
+	storyThreadList: () => typedError<StoryThread[], string>(__TAURI_INVOKE("story_thread_list")),
+	storyThreadSave: (input: StoryThreadInput) => typedError<StoryThread, string>(__TAURI_INVOKE("story_thread_save", { input })),
+	storyThreadDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("story_thread_delete", { id })),
+	craftReport: () => typedError<CraftReport, string>(__TAURI_INVOKE("craft_report")),
+	workflowPipeline: () => typedError<WorkflowPipeline, string>(__TAURI_INVOKE("workflow_pipeline")),
 };
 
 /* Types */
@@ -471,6 +482,7 @@ export type ChatMessage = {
 	createdAt: string,
 	linkedCandidateIds: string[],
 	pinned: boolean,
+	agentRunId: string | null,
 };
 
 export type ChatSendInput = {
@@ -561,6 +573,25 @@ export type ContextSection = {
 	content: string,
 	chars: number,
 	budget: number,
+};
+
+export type CraftCheck = {
+	code: string,
+	/**  error / warning / info */
+	severity: string,
+	chapter: number | null,
+	threadId: string | null,
+	message: string,
+	suggestion: string,
+};
+
+/**  章节工艺与叙事线程的确定性诊断。只提示，不阻断，也不改写作者内容。 */
+export type CraftReport = {
+	chapterCount: number,
+	chaptersWithShift: number,
+	chaptersWithHook: number,
+	openThreads: number,
+	checks: CraftCheck[],
 };
 
 export type CreateProjectInput = {
@@ -693,6 +724,30 @@ export type GraphNode = {
 	label: string,
 	kind: string,
 	community: number | null,
+};
+
+export type HarnessToolTrace = {
+	stepId: string,
+	seq: number,
+	toolName: string,
+	title: string,
+	input: any,
+	summary: string,
+	status: string,
+	candidateIds: string[],
+	/**  ask_author 选项卡、工作流产物的确认卡等；无动作时为 null。 */
+	action: any,
+};
+
+export type HarnessTurnResult = {
+	runId: string,
+	session: ChatSession,
+	userMessage: ChatMessage,
+	assistantMessage: ChatMessage,
+	traces: HarnessToolTrace[],
+	candidates: Candidate[],
+	plan: any,
+	actions: any,
 };
 
 export type HybridSearchHit = {
@@ -938,6 +993,8 @@ export type NarrativeGenerateInput = {
 	medium: string,
 	structureStrategy: string,
 	targetUnits: number | null,
+	/**  quick 单次生成；standard / epic 分层构建故事圣经。缺省时按种子卡篇幅推断。 */
+	depth?: string | null,
 };
 
 export type NarrativeLogicEdge = {
@@ -1031,6 +1088,10 @@ export type OutlineNode = {
 	logicNodeIds: string[],
 	presentationMode: string,
 	narrativeFunction: string,
+	valueShift: string,
+	crisis: string,
+	hook: string,
+	reveal: string,
 	status: string,
 	branchId: string | null,
 	source: string,
@@ -1050,6 +1111,10 @@ export type OutlineUpdateInput = {
 	conflict: string,
 	turn: string,
 	payoff: string,
+	valueShift?: string | null,
+	crisis?: string | null,
+	hook?: string | null,
+	reveal?: string | null,
 };
 
 export type PayoffCheck = {
@@ -1058,6 +1123,20 @@ export type PayoffCheck = {
 	plantEvidenceIds: string[],
 	payoffEvidenceIds: string[],
 	stateChange: string,
+};
+
+export type PipelineStage = {
+	key: string,
+	label: string,
+	description: string,
+	/**  done / active / todo / optional */
+	status: string,
+	progress: number | null,
+	detail: string,
+	/**  前端导航键 */
+	nav: string,
+	/**  交给 Agent 的一句话任务 */
+	prompt: string,
 };
 
 export type PlotBeatsInput = {
@@ -1170,6 +1249,12 @@ export type ProjectCounts = {
 	knowledgeEntries: number,
 	openIssues: number,
 	promises: number,
+};
+
+/**  作者守则：项目级长期指令，注入 Agent 与生成任务契约。 */
+export type ProjectGuide = {
+	content: string,
+	updatedAt: string | null,
 };
 
 export type ProjectSnapshot = {
@@ -1338,6 +1423,31 @@ export type SourceDocument = {
 	title: string,
 	wordCount: number,
 	importedAt: string,
+};
+
+/**  叙事线程：环境（milieu）、疑问（inquiry）、人物（character）、事件（event）。 */
+export type StoryThread = {
+	id: string,
+	kind: string,
+	title: string,
+	question: string,
+	openChapter: number | null,
+	closeChapter: number | null,
+	status: string,
+	notes: string,
+	createdAt: string,
+	updatedAt: string,
+};
+
+export type StoryThreadInput = {
+	id: string | null,
+	kind: string,
+	title: string,
+	question: string,
+	openChapter: number | null,
+	closeChapter: number | null,
+	status: string,
+	notes: string,
 };
 
 export type StyleCheck = {
@@ -1628,6 +1738,12 @@ export type WikiRebuildResult = {
 	promises: number,
 	chapters: number,
 	preservedAuthorPages: number,
+};
+
+/**  创作流水线：从前提到定稿的阶段门槛。 */
+export type WorkflowPipeline = {
+	stages: PipelineStage[],
+	activeKey: string,
 };
 
 /* Tauri Specta runtime */

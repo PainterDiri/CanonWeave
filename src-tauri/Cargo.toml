@@ -8,7 +8,8 @@ rust-version = "1.77"
 
 [lib]
 name = "canonweave_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# 仅桌面端：staticlib/cdylib 只服务移动端，会在每个 profile 额外产出数百 MB 产物。
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -38,11 +39,27 @@ walkdir = "2"
 zip = { version = "4", default-features = false, features = ["deflate"] }
 quick-xml = "0.42"
 encoding_rs = "0.8"
-z3 = { version = "0.21", features = ["bundled"] }
 petgraph = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
+
+# 构建体积控制：依赖不生成调试信息，增量产物与最终应用都保持轻量。
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true
 
 [features]
 default = ["custom-protocol"]
