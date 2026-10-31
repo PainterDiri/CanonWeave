@@ -60,8 +60,8 @@ fn element_from_row(row: &Row<'_>) -> rusqlite::Result<NarrativeElement> {
         secret: row.get(13)?,
         relations: serde_json::from_str(&relations).unwrap_or_else(|_| json!([])),
         metadata: serde_json::from_str(&metadata).unwrap_or_else(|_| json!({})),
-        status: row.get(13)?,
-        sort_order: row.get(14)?,
+        status: row.get(14)?,
+        sort_order: row.get(15)?,
     })
 }
 
@@ -197,7 +197,7 @@ pub fn get_view(
 
     let mut elements_stmt = conn.prepare(
         "SELECT id, kind, name, role, summary, external_goal, internal_need, fear, flaw,
-                constraints_json, leverage, relations_json, metadata_json, status, sort_order
+                constraints_json, leverage, relations_json, metadata_json, secret, status, sort_order
          FROM narrative_element WHERE blueprint_id=?1 ORDER BY sort_order, created_at",
     )?;
     let elements = elements_stmt
@@ -264,7 +264,15 @@ pub fn get_view(
         .query_map([blueprint_id], presentation_from_row)?
         .collect::<Result<Vec<_>, _>>()?;
 
-    let diagnostics = diagnose_values(&blueprint, &elements, &timeline, &threads, &nodes, &edges, &presentations);
+    let diagnostics = diagnose_values(
+        &blueprint,
+        &elements,
+        &timeline,
+        &threads,
+        &nodes,
+        &edges,
+        &presentations,
+    );
     Ok(NarrativeBlueprintView {
         blueprint,
         elements,
@@ -487,7 +495,12 @@ pub fn diagnose_values(
     };
 
     if !["novel", "game"].contains(&blueprint.medium.as_str()) {
-        push("medium.invalid", "error", "媒介必须是 novel 或 game", "blueprint.medium");
+        push(
+            "medium.invalid",
+            "error",
+            "媒介必须是 novel 或 game",
+            "blueprint.medium",
+        );
     }
     if !["adaptive", "fixed"].contains(&blueprint.structure_strategy.as_str()) {
         push(
@@ -498,18 +511,42 @@ pub fn diagnose_values(
         );
     }
     if blueprint.structure_strategy == "fixed" && blueprint.target_units.unwrap_or(0) < 1 {
-        push("target.missing", "error", "固定结构必须填写目标章节或任务数", "blueprint.targetUnits");
+        push(
+            "target.missing",
+            "error",
+            "固定结构必须填写目标章节或任务数",
+            "blueprint.targetUnits",
+        );
     }
     if !non_empty(&blueprint.core_dramatic_question) {
-        push("question.missing", "error", "缺少全书核心戏剧问题", "blueprint.coreDramaticQuestion");
+        push(
+            "question.missing",
+            "error",
+            "缺少全书核心戏剧问题",
+            "blueprint.coreDramaticQuestion",
+        );
     }
     if !non_empty(&blueprint.opening_state) || !non_empty(&blueprint.ending_state) {
-        push("state.missing", "error", "必须明确开局长板与终局状态的变化", "blueprint.openingState");
+        push(
+            "state.missing",
+            "error",
+            "必须明确开局长板与终局状态的变化",
+            "blueprint.openingState",
+        );
     }
 
-    let characters = elements.iter().filter(|item| item.kind == "character").count();
-    let factions = elements.iter().filter(|item| item.kind == "faction").count();
-    let world_rules = elements.iter().filter(|item| item.kind == "world_rule").count();
+    let characters = elements
+        .iter()
+        .filter(|item| item.kind == "character")
+        .count();
+    let factions = elements
+        .iter()
+        .filter(|item| item.kind == "faction")
+        .count();
+    let world_rules = elements
+        .iter()
+        .filter(|item| item.kind == "world_rule")
+        .count();
     let element_names: HashSet<&str> = elements
         .iter()
         .map(|item| item.name.trim())
@@ -517,7 +554,12 @@ pub fn diagnose_values(
         .collect();
     let mut relation_edges = 0usize;
     if characters < 2 {
-        push("characters.thin", "error", "至少需要两个目标互相冲突的核心人物", "elements");
+        push(
+            "characters.thin",
+            "error",
+            "至少需要两个目标互相冲突的核心人物",
+            "elements",
+        );
     }
     if factions + world_rules < 2 {
         push(
@@ -529,7 +571,12 @@ pub fn diagnose_values(
     }
     for (index, element) in elements.iter().enumerate() {
         if !non_empty(&element.name) || !non_empty(&element.summary) {
-            push("element.incomplete", "error", "人物或设定必须填写名称和可验证摘要", &format!("elements[{index}]"));
+            push(
+                "element.incomplete",
+                "error",
+                "人物或设定必须填写名称和可验证摘要",
+                &format!("elements[{index}]"),
+            );
         }
         if element.kind == "character" {
             if !non_empty(&element.external_goal) || !non_empty(&element.fear) {
@@ -592,7 +639,12 @@ pub fn diagnose_values(
         );
     }
     if timeline.len() < 3 {
-        push("timeline.thin", "error", "时间线至少需要三个有因果关系的节点", "timeline");
+        push(
+            "timeline.thin",
+            "error",
+            "时间线至少需要三个有因果关系的节点",
+            "timeline",
+        );
     }
     let mut timeline_orders = HashSet::new();
     for (index, event) in timeline.iter().enumerate() {
@@ -614,7 +666,8 @@ pub fn diagnose_values(
                 );
             }
         }
-        if !non_empty(&event.cause) || !non_empty(&event.outcome) || !non_empty(&event.consequence) {
+        if !non_empty(&event.cause) || !non_empty(&event.outcome) || !non_empty(&event.consequence)
+        {
             push(
                 "timeline.cause",
                 "error",
@@ -627,13 +680,23 @@ pub fn diagnose_values(
         push("thread.missing", "error", "至少需要一条叙事主线", "threads");
     }
     if nodes.len() < 6 {
-        push("logic.thin", "error", "逻辑链至少需要六个可验证的状态变化节点", "nodes");
+        push(
+            "logic.thin",
+            "error",
+            "逻辑链至少需要六个可验证的状态变化节点",
+            "nodes",
+        );
     }
 
     let mut orders = HashSet::new();
     for (index, node) in nodes.iter().enumerate() {
         if node.order_no <= 0 || !orders.insert(node.order_no) {
-            push("logic.order", "error", "逻辑节点序号必须唯一且为正数", &format!("nodes[{index}]"));
+            push(
+                "logic.order",
+                "error",
+                "逻辑节点序号必须唯一且为正数",
+                &format!("nodes[{index}]"),
+            );
         }
         for (field, value) in [
             ("cause", &node.cause),
@@ -653,7 +716,12 @@ pub fn diagnose_values(
             }
         }
         if node.thread_id.is_none() {
-            push("logic.thread", "error", "逻辑节点必须归属叙事线", &format!("nodes[{index}]"));
+            push(
+                "logic.thread",
+                "error",
+                "逻辑节点必须归属叙事线",
+                &format!("nodes[{index}]"),
+            );
         }
         if node.participants.is_empty() {
             push(
@@ -676,30 +744,58 @@ pub fn diagnose_values(
     }
 
     let ids: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
-    let mut incoming: HashMap<&str, usize> = nodes.iter().map(|node| (node.id.as_str(), 0)).collect();
-    let mut outgoing: HashMap<&str, usize> = nodes.iter().map(|node| (node.id.as_str(), 0)).collect();
+    let mut incoming: HashMap<&str, usize> =
+        nodes.iter().map(|node| (node.id.as_str(), 0)).collect();
+    let mut outgoing: HashMap<&str, usize> =
+        nodes.iter().map(|node| (node.id.as_str(), 0)).collect();
     for (index, edge) in edges.iter().enumerate() {
         if !ids.contains(edge.from_node_id.as_str()) || !ids.contains(edge.to_node_id.as_str()) {
-            push("edge.dangling", "error", "因果边指向不存在的逻辑节点", &format!("edges[{index}]"));
+            push(
+                "edge.dangling",
+                "error",
+                "因果边指向不存在的逻辑节点",
+                &format!("edges[{index}]"),
+            );
         }
         if !non_empty(&edge.relation) {
-            push("edge.relation", "error", "因果边必须说明关系类型", &format!("edges[{index}]"));
+            push(
+                "edge.relation",
+                "error",
+                "因果边必须说明关系类型",
+                &format!("edges[{index}]"),
+            );
         }
         *incoming.entry(edge.to_node_id.as_str()).or_default() += 1;
         *outgoing.entry(edge.from_node_id.as_str()).or_default() += 1;
     }
     if nodes.len() > 1 {
-        let roots = nodes.iter().filter(|node| incoming.get(node.id.as_str()).copied().unwrap_or(0) == 0).count();
-        let terminals = nodes.iter().filter(|node| outgoing.get(node.id.as_str()).copied().unwrap_or(0) == 0).count();
+        let roots = nodes
+            .iter()
+            .filter(|node| incoming.get(node.id.as_str()).copied().unwrap_or(0) == 0)
+            .count();
+        let terminals = nodes
+            .iter()
+            .filter(|node| outgoing.get(node.id.as_str()).copied().unwrap_or(0) == 0)
+            .count();
         if roots != 1 {
-            push("graph.roots", "error", "因果链应只有一个核心起点，当前存在多个无前因节点", "edges");
+            push(
+                "graph.roots",
+                "error",
+                "因果链应只有一个核心起点，当前存在多个无前因节点",
+                "edges",
+            );
         }
         if terminals == 0 {
             push("graph.terminal", "error", "因果链没有终局节点", "edges");
         }
     }
     if nodes.len() > 1 && edges.len() < nodes.len() - 1 {
-        push("graph.disconnected", "error", "因果链存在断点，无法从起点完整推到终局", "edges");
+        push(
+            "graph.disconnected",
+            "error",
+            "因果链存在断点，无法从起点完整推到终局",
+            "edges",
+        );
     }
     if let Some(start) = nodes
         .iter()
@@ -725,7 +821,12 @@ pub fn diagnose_values(
             }
         }
         if seen.len() < nodes.len() {
-            push("graph.unreachable", "error", "存在无法从核心起点到达的逻辑节点", "edges");
+            push(
+                "graph.unreachable",
+                "error",
+                "存在无法从核心起点到达的逻辑节点",
+                "edges",
+            );
         }
     }
 
@@ -747,7 +848,16 @@ pub fn diagnose_values(
                     &format!("presentations[{index}]"),
                 );
             }
-            if !["dialogue", "environmental", "prop_text", "cutscene", "mixed", "silent"].contains(&presentation.mode.as_str()) {
+            if ![
+                "dialogue",
+                "environmental",
+                "prop_text",
+                "cutscene",
+                "mixed",
+                "silent",
+            ]
+            .contains(&presentation.mode.as_str())
+            {
                 push(
                     "presentation.mode",
                     "error",
@@ -861,8 +971,16 @@ pub fn save_generated(
                 item.leverage.trim(),
                 serde_json::to_string(&item.constraints)?,
                 item.secret.trim(),
-                serde_json::to_string(&if item.relations.is_null() { json!([]) } else { item.relations.clone() })?,
-                serde_json::to_string(&if item.metadata.is_null() { json!({}) } else { item.metadata.clone() })?,
+                serde_json::to_string(&if item.relations.is_null() {
+                    json!([])
+                } else {
+                    item.relations.clone()
+                })?,
+                serde_json::to_string(&if item.metadata.is_null() {
+                    json!({})
+                } else {
+                    item.metadata.clone()
+                })?,
                 index as i32,
                 ts
             ],
@@ -870,7 +988,11 @@ pub fn save_generated(
     }
 
     for (index, event) in foundation.timeline.iter().enumerate() {
-        let order_no = if event.order_no > 0 { event.order_no } else { (index + 1) as i32 };
+        let order_no = if event.order_no > 0 {
+            event.order_no
+        } else {
+            (index + 1) as i32
+        };
         tx.execute(
             "INSERT INTO narrative_timeline_event
              (id, blueprint_id, order_no, title, story_time, cause, participants_json,
@@ -896,7 +1018,11 @@ pub fn save_generated(
     for (index, thread) in foundation.threads.iter().enumerate() {
         let id = uuid::Uuid::new_v4().to_string();
         thread_ids.push(id.clone());
-        let order_no = if thread.order_no > 0 { thread.order_no } else { (index + 1) as i32 };
+        let order_no = if thread.order_no > 0 {
+            thread.order_no
+        } else {
+            (index + 1) as i32
+        };
         tx.execute(
             "INSERT INTO narrative_thread
              (id, blueprint_id, order_no, kind, title, dramatic_question, opening_state,
@@ -906,7 +1032,11 @@ pub fn save_generated(
                 id,
                 blueprint_id,
                 order_no,
-                if thread.kind.trim().is_empty() { "main" } else { thread.kind.trim() },
+                if thread.kind.trim().is_empty() {
+                    "main"
+                } else {
+                    thread.kind.trim()
+                },
                 thread.title.trim(),
                 thread.dramatic_question.trim(),
                 thread.opening_state.trim(),
@@ -919,10 +1049,16 @@ pub fn save_generated(
 
     let mut node_ids = HashMap::new();
     for (index, node) in chain.nodes.iter().enumerate() {
-        let order_no = if node.order_no > 0 { node.order_no } else { (index + 1) as i32 };
+        let order_no = if node.order_no > 0 {
+            node.order_no
+        } else {
+            (index + 1) as i32
+        };
         let id = uuid::Uuid::new_v4().to_string();
         node_ids.insert(order_no, id.clone());
-        let thread_id = node.thread_index.and_then(|thread_index| thread_ids.get(thread_index).cloned());
+        let thread_id = node
+            .thread_index
+            .and_then(|thread_index| thread_ids.get(thread_index).cloned());
         tx.execute(
             "INSERT INTO narrative_logic_node
              (id, blueprint_id, thread_id, order_no, kind, title, cause, choice, cost,
@@ -934,7 +1070,11 @@ pub fn save_generated(
                 blueprint_id,
                 thread_id,
                 order_no,
-                if node.kind.trim().is_empty() { "beat" } else { node.kind.trim() },
+                if node.kind.trim().is_empty() {
+                    "beat"
+                } else {
+                    node.kind.trim()
+                },
                 node.title.trim(),
                 node.cause.trim(),
                 node.choice.trim(),
@@ -951,8 +1091,12 @@ pub fn save_generated(
     }
 
     for edge in &chain.edges {
-        let Some(from_node_id) = node_ids.get(&edge.from_order) else { continue };
-        let Some(to_node_id) = node_ids.get(&edge.to_order) else { continue };
+        let Some(from_node_id) = node_ids.get(&edge.from_order) else {
+            continue;
+        };
+        let Some(to_node_id) = node_ids.get(&edge.to_order) else {
+            continue;
+        };
         tx.execute(
             "INSERT INTO narrative_logic_edge
              (id, blueprint_id, from_node_id, to_node_id, relation, condition, status, created_at)
@@ -970,7 +1114,9 @@ pub fn save_generated(
     }
 
     for presentation in &chain.presentations {
-        let Some(logic_node_id) = node_ids.get(&presentation.node_order) else { continue };
+        let Some(logic_node_id) = node_ids.get(&presentation.node_order) else {
+            continue;
+        };
         let medium = if presentation.medium.trim().is_empty() {
             input.medium.as_str()
         } else {
@@ -987,7 +1133,11 @@ pub fn save_generated(
                 blueprint_id,
                 logic_node_id,
                 medium,
-                if presentation.mode.trim().is_empty() { "mixed" } else { presentation.mode.trim() },
+                if presentation.mode.trim().is_empty() {
+                    "mixed"
+                } else {
+                    presentation.mode.trim()
+                },
                 presentation.pov.trim(),
                 presentation.dialogue_ratio.clamp(0, 100),
                 presentation.narration_ratio.clamp(0, 100),
@@ -1163,8 +1313,16 @@ pub fn chapter_logic_context(
         view.blueprint.core_dramatic_question,
         view.blueprint.opening_state,
         view.blueprint.ending_state,
-        if chapter_mode.trim().is_empty() { "未标注" } else { chapter_mode.as_str() },
-        if chapter_function.trim().is_empty() { "未标注" } else { chapter_function.as_str() },
+        if chapter_mode.trim().is_empty() {
+            "未标注"
+        } else {
+            chapter_mode.as_str()
+        },
+        if chapter_function.trim().is_empty() {
+            "未标注"
+        } else {
+            chapter_function.as_str()
+        },
     )];
     if ids.is_empty() {
         parts.push(
@@ -1215,7 +1373,11 @@ pub fn chapter_logic_context(
                 edge.from_title,
                 edge.to_title,
                 edge.relation,
-                if edge.condition.is_empty() { "无额外条件" } else { &edge.condition }
+                if edge.condition.is_empty() {
+                    "无额外条件"
+                } else {
+                    &edge.condition
+                }
             ));
         }
     }
@@ -1385,6 +1547,13 @@ mod tests {
         assert_eq!(view.nodes.len(), 7);
         assert_eq!(view.edges.len(), 6);
         assert!(view.diagnostics.iter().all(|item| item.severity != "error"));
+        let hero = view
+            .elements
+            .iter()
+            .find(|item| item.name == "林澈")
+            .unwrap();
+        assert_eq!(hero.secret, "他曾主动抹去一段记忆");
+        assert_eq!(hero.status, "candidate");
     }
 
     #[test]
@@ -1407,7 +1576,9 @@ mod tests {
         .unwrap();
         let confirmed = confirm(&mut loaded.conn, &pid, &view.blueprint.id).unwrap();
         assert_eq!(confirmed.blueprint.status, "confirmed");
-        assert!(logic_context(&loaded.conn, &pid, 20).unwrap().contains("核心戏剧问题"));
+        assert!(logic_context(&loaded.conn, &pid, 20)
+            .unwrap()
+            .contains("核心戏剧问题"));
     }
 }
 
@@ -1502,7 +1673,11 @@ pub fn update_candidate(
             params![
                 item.id,
                 input.id,
-                if item.order_no > 0 { item.order_no } else { (index + 1) as i32 },
+                if item.order_no > 0 {
+                    item.order_no
+                } else {
+                    (index + 1) as i32
+                },
                 item.title.trim(),
                 item.story_time.trim(),
                 item.cause.trim(),
@@ -1523,7 +1698,11 @@ pub fn update_candidate(
             params![
                 item.id,
                 input.id,
-                if item.order_no > 0 { item.order_no } else { (index + 1) as i32 },
+                if item.order_no > 0 {
+                    item.order_no
+                } else {
+                    (index + 1) as i32
+                },
                 item.kind.trim(),
                 item.title.trim(),
                 item.dramatic_question.trim(),
@@ -1545,7 +1724,11 @@ pub fn update_candidate(
                 item.id,
                 input.id,
                 item.thread_id,
-                if item.order_no > 0 { item.order_no } else { (index + 1) as i32 },
+                if item.order_no > 0 {
+                    item.order_no
+                } else {
+                    (index + 1) as i32
+                },
                 item.kind.trim(),
                 item.title.trim(),
                 item.cause.trim(),
@@ -1636,7 +1819,6 @@ pub fn update_candidate(
     refresh_diagnostics(conn, project_id, &input.id)?;
     get_view(conn, project_id, &input.id)
 }
-
 
 #[cfg(test)]
 mod edit_tests {
@@ -1804,8 +1986,94 @@ mod edit_tests {
         assert_eq!(broken.edges.len(), 1);
         assert!(broken.diagnostics.iter().any(|item| {
             item.severity == "error"
-                && ["graph.roots", "graph.disconnected", "graph.unreachable"].contains(&item.code.as_str())
+                && ["graph.roots", "graph.disconnected", "graph.unreachable"]
+                    .contains(&item.code.as_str())
         }));
     }
+}
 
+#[cfg(test)]
+mod patch_tests {
+    use super::tests::{chain, foundation, seed_project};
+    use super::*;
+    use crate::domain::NarrativeGenerateInput;
+    use crate::llm::ToolCall;
+
+    #[test]
+    fn agent_patch_applies_only_after_author_accepts_and_guards_stale_edits() {
+        let (mut loaded, premise_id) = seed_project();
+        let pid = loaded.summary.id.clone();
+        let view = save_generated(
+            &mut loaded.conn,
+            &pid,
+            &premise_id,
+            &NarrativeGenerateInput {
+                depth: None,
+                medium: "novel".into(),
+                structure_strategy: "adaptive".into(),
+                target_units: None,
+            },
+            &foundation(),
+            &chain(),
+        )
+        .unwrap();
+        let session = crate::chat::create(
+            &loaded.conn,
+            &pid,
+            &crate::domain::ChatSessionCreateInput {
+                scope: "plot".into(),
+                mode: "plot".into(),
+                title: None,
+                scene_id: None,
+                branch_id: None,
+                parent_session_id: None,
+            },
+        )
+        .unwrap();
+        let run_id =
+            crate::harness::create_run(&loaded.conn, &pid, &session.id, "修订", "write", "m")
+                .unwrap();
+        let call = ToolCall {
+            id: "c".into(),
+            name: "propose_blueprint_patch".into(),
+            arguments: json!({
+                "reason": "年代自洽",
+                "changes": [
+                    {"target":"element","name":"林澈","field":"secret","value":"他在封箱夜亲手抹去了妹妹的车票"},
+                    {"target":"node","order":1,"field":"cost","value":"他忘了自己为何上车"},
+                    {"target":"element","name":"不存在","field":"secret","value":"x"}
+                ]
+            })
+            .to_string(),
+        };
+        let (step_id, _) = crate::harness::begin_step(&loaded.conn, &run_id, &call).unwrap();
+        let outcome = crate::harness::execute(
+            &crate::harness::ToolContext {
+                conn: &loaded.conn,
+                project_id: &pid,
+                session_id: &session.id,
+                run_id: &run_id,
+                step_id: &step_id,
+                mode: "write",
+            },
+            &call,
+        );
+        assert_eq!(outcome.candidate_ids.len(), 1, "{}", outcome.content);
+        assert!(outcome.content.contains("找不到条目「不存在」"));
+        // 未确认前蓝本不变。
+        let unchanged = candidate(&loaded.conn, &pid).unwrap().unwrap();
+        let hero = unchanged
+            .elements
+            .iter()
+            .find(|e| e.name == "林澈")
+            .unwrap();
+        assert_eq!(hero.secret, "他曾主动抹去一段记忆");
+
+        crate::candidates::accept(&mut loaded.conn, &pid, &outcome.candidate_ids[0]).unwrap();
+        let patched = candidate(&loaded.conn, &pid).unwrap().unwrap();
+        let hero = patched.elements.iter().find(|e| e.name == "林澈").unwrap();
+        assert_eq!(hero.secret, "他在封箱夜亲手抹去了妹妹的车票");
+        assert_eq!(patched.nodes[0].cost, "他忘了自己为何上车");
+        assert_eq!(view.blueprint.id, patched.blueprint.id);
+    }
 }

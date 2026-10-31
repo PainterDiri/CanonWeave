@@ -1235,6 +1235,8 @@ function candidateLabel(kind: string) {
       knowledge_entry: "知识条目",
       outline_patch: "大纲节点",
       craft_patch: "章节工艺卡",
+      blueprint_patch: "蓝本修订",
+      entity_patch: "人物修订",
       story_thread: "叙事线程",
       project_guide: "作者守则",
       draft: "正文草稿",
@@ -1273,6 +1275,14 @@ export function summaryOf(candidate: Candidate): string {
       .join("；");
     return `第 ${p.chapter ?? "?"} 章 · ${changes}`.slice(0, 120);
   }
+  if (candidate.kind === "entity_patch") {
+    const fields = Object.keys(p.changes ?? {}).map((key) => entityFieldLabel(key));
+    return `${p.canonicalName ?? "人物"} · 修订 ${fields.join("、")}`;
+  }
+  if (candidate.kind === "blueprint_patch") {
+    const changes = (p.changes ?? []) as { label?: string; field?: string }[];
+    return `${changes.length} 处：${changes.map((change) => change.label).join("、")}`.slice(0, 120);
+  }
   if (candidate.kind === "story_thread") {
     return `${p.title ?? "线程"}：${String(p.question ?? "").slice(0, 60)}`;
   }
@@ -1286,6 +1296,12 @@ export function summaryOf(candidate: Candidate): string {
     return `${p.name ?? "文笔档案"}：${String(p.agentReason ?? "等待作者确认具体文笔参数。").slice(0, 80)}`;
   }
   return String(p.text ?? p.description ?? p.title ?? "候选内容").slice(0, 90);
+}
+
+function entityFieldLabel(key: string): string {
+  return (
+    { description: "简介", desire: "欲望", need: "需要", fear: "恐惧", flaw: "缺陷", secret: "秘密" }[key] ?? key
+  );
 }
 
 function craftFieldLabel(key: string): string {

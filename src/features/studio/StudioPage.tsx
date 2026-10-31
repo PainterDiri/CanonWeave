@@ -105,6 +105,10 @@ export function StudioPage() {
   const refreshProject = useAppStore((s) => s.refreshProject);
 
   const currentChapter = chapters.find((chapter) => chapter.id === chapterId) ?? null;
+  // 草稿写入当前选中的章节，所以只列出属于这一章（或未绑定章节）的草稿。
+  const chapterDrafts = drafts.filter(
+    (draft) => !draft.payload.chapterId || draft.payload.chapterId === chapterId,
+  );
   const currentScene = scenes.find((scene) => scene.id === sceneId) ?? null;
 
   const loadDrafts = useCallback(async () => {
@@ -190,7 +194,8 @@ export function StudioPage() {
     setChapterId(id);
     setBusy(true);
     try {
-      await loadChapter(id);
+      // Agent 可能在别的页面刚提交了草稿，切章时顺手刷新。
+      await Promise.all([loadChapter(id), loadDrafts()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -753,15 +758,15 @@ export function StudioPage() {
 
             <section className="paper-card flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="border-b border-line px-3.5 py-2.5 text-[10.5px] font-semibold text-ink-soft">
-                草稿候选 {drafts.length}
+                草稿候选 {chapterDrafts.length}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-2">
-                {drafts.length === 0 ? (
+                {chapterDrafts.length === 0 ? (
                   <div className="px-2 py-6 text-center text-[9.5px] leading-5 text-muted">
                     生成或“继续写”的草稿会进入这里，接受后才写入正文。
                   </div>
                 ) : (
-                  drafts.map((draft) => {
+                  chapterDrafts.map((draft) => {
                     const factDelta = draft.payload.factDelta;
                     const blocked = Boolean(factDelta?.blocked);
                     const refined = draft.kind === "draft_refined";

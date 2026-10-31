@@ -499,7 +499,12 @@ pub fn accept(
             }
             let place_id: Option<String> = match payload.get("placeId").and_then(Value::as_str) {
                 Some(id) => Some(id.to_string()),
-                None => match payload.get("place").and_then(Value::as_str) {
+                // 模型和蓝本同步常写 location，与 place 同义。
+                None => match payload
+                    .get("place")
+                    .or_else(|| payload.get("location"))
+                    .and_then(Value::as_str)
+                {
                     Some(name) if !name.trim().is_empty() => find_entity(&tx, project_id, name)?,
                     _ => None,
                 },
@@ -776,6 +781,124 @@ pub fn accept(
                 ],
             )?;
             id
+        }
+        "entity_patch" => {
+            let entity_id = payload
+                .get("entityId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Message("人物修订缺少实体".into()))?;
+            let current: String = tx
+                .query_row(
+                    "SELECT updated_at FROM entity WHERE id=?1 AND project_id=?2",
+                    params![entity_id, project_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or_else(|| AppError::Message("要修订的实体已不存在".into()))?;
+            if payload.get("baseUpdatedAt").and_then(Value::as_str) != Some(current.as_str()) {
+                return Err(AppError::Message(
+                    "该条目在候选生成后已被修改，请让 Agent 基于最新内容重新提出".into(),
+                ));
+            }
+            let changes = payload.get("changes").cloned().unwrap_or_else(|| json!({}));
+            let field = |key: &str| changes.get(key).and_then(Value::as_str);
+            if let Some(description) = field("description") {
+                tx.execute(
+                    "UPDATE entity SET description=?2 WHERE id=?1",
+                    params![entity_id, description],
+                )?;
+            }
+            tx.execute(
+                "INSERT INTO character_core (entity_id, updated_at) VALUES (?1, ?2)
+                 ON CONFLICT(entity_id) DO NOTHING",
+                params![entity_id, ts],
+            )?;
+            for key in ["desire", "need", "fear", "flaw", "secret"] {
+                if let Some(value) = field(key) {
+                    tx.execute(
+                        &format!(
+                            "UPDATE character_core SET {key}=?2, updated_at=?3 WHERE entity_id=?1"
+                        ),
+                        params![entity_id, value, ts],
+                    )?;
+                }
+            }
+            tx.execute(
+                "UPDATE entity SET updated_at=?2 WHERE id=?1",
+                params![entity_id, ts],
+            )?;
+            entity_id.to_string()
+        }
+        "blueprint_patch" => {
+            let blueprint_id = payload
+                .get("blueprintId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::Message("蓝本修订缺少蓝本".into()))?;
+            let status: String = tx
+                .query_row(
+                    "SELECT status FROM narrative_blueprint WHERE id=?1 AND project_id=?2",
+                    params![blueprint_id, project_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or_else(|| AppError::Message("蓝本已不存在".into()))?;
+            if status == "confirmed" {
+                return Err(AppError::Message("蓝本已确认，不能再用候选修改".into()));
+            }
+            let changes = payload
+                .get("changes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for change in &changes {
+                let target = change
+                    .get("target")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let field = change
+                    .get("field")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let column = crate::harness::blueprint_patch_column(target, field)
+                    .ok_or_else(|| AppError::Message(format!("不可修订的字段：{field}")))?;
+                let table = if target == "element" {
+                    "narrative_element"
+                } else {
+                    "narrative_logic_node"
+                };
+                let id = change.get("id").and_then(Value::as_str).unwrap_or_default();
+                let current: String = tx
+                    .query_row(
+                        &format!("SELECT {column} FROM {table} WHERE id=?1 AND blueprint_id=?2"),
+                        params![id, blueprint_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| AppError::Message("要修订的蓝本条目已不存在".into()))?;
+                let before = change
+                    .get("before")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if current != before {
+                    let label = change
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    return Err(AppError::Message(format!(
+                        "「{label}」在候选生成后已被修改，请让 Agent 基于最新内容重新提出"
+                    )));
+                }
+                let value = change
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                tx.execute(
+                    &format!("UPDATE {table} SET {column}=?2, updated_at=?3 WHERE id=?1"),
+                    params![id, value, ts],
+                )?;
+            }
+            crate::blueprint::refresh_diagnostics(&tx, project_id, blueprint_id)?;
+            blueprint_id.to_string()
         }
         "craft_patch" => {
             let node_id = payload

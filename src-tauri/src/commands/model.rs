@@ -10,7 +10,7 @@ use crate::{
 #[tauri::command]
 #[specta::specta]
 pub fn model_get(state: State<'_, AppState>) -> ModelConfig {
-    let _ = state.api_key();
+    // 只返回非机密的“已保存密钥”标记；真正读取钥匙串留到第一次调用模型时，启动不弹授权框。
     state.model_store.load()
 }
 

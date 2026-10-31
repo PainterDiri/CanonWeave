@@ -729,12 +729,42 @@ pub fn finalize_index(
     Ok(stale)
 }
 
-pub fn mark_all_stale(conn: &Connection, project_id: &str) -> AppResult<()> {
-    conn.execute(
-        "UPDATE embedding SET status='stale', updated_at=?2
+/// 事实变更后只让内容哈希变了（或来源已不存在）的向量失效；未变的向量继续参与混合检索。
+pub fn mark_changed_stale(conn: &Connection, project_id: &str) -> AppResult<()> {
+    let current: std::collections::HashMap<(String, String), String> =
+        collect_documents(conn, project_id)?
+            .into_iter()
+            .map(|document| {
+                (
+                    (document.owner_kind, document.owner_id),
+                    document.content_hash,
+                )
+            })
+            .collect();
+    let mut stmt = conn.prepare(
+        "SELECT id, owner_kind, owner_id, content_hash FROM embedding
          WHERE project_id=?1 AND status IN ('ready','pending')",
-        params![project_id, now()],
     )?;
+    let rows = stmt
+        .query_map([project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    let ts = now();
+    for (id, kind, owner, hash) in rows {
+        if current.get(&(kind, owner)) != Some(&hash) {
+            conn.execute(
+                "UPDATE embedding SET status='stale', updated_at=?2 WHERE id=?1",
+                params![id, ts],
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -1016,6 +1046,50 @@ mod tests {
             })
             .unwrap();
         assert_eq!(status, "stale");
+    }
+
+    #[test]
+    fn fact_changes_only_invalidate_vectors_whose_content_changed() {
+        let (_dir, loaded) = fixture();
+        let pid = loaded.summary.id.clone();
+        for (id, name) in [("a", "林澈"), ("b", "顾鸢")] {
+            loaded
+                .conn
+                .execute(
+                    "INSERT INTO entity
+                     (id,project_id,type,canonical_name,aliases,status,description,created_at,updated_at)
+                     VALUES (?1,?2,'character',?3,'[]','confirmed','旧描述','now','now')",
+                    rusqlite::params![id, pid, name],
+                )
+                .unwrap();
+        }
+        for document in collect_documents(&loaded.conn, &pid).unwrap() {
+            loaded
+                .conn
+                .execute(
+                    "INSERT INTO embedding
+                     (id,project_id,owner_kind,owner_id,model,dim,vector,content,content_hash,status,
+                      branch_id,updated_at,created_at)
+                     VALUES (?1,?2,'entity',?1,'test-embed',2,X'',?3,?4,'ready',NULL,'now','now')",
+                    rusqlite::params![document.owner_id, pid, document.content, document.content_hash],
+                )
+                .unwrap();
+        }
+        loaded
+            .conn
+            .execute("UPDATE entity SET description='新描述' WHERE id='a'", [])
+            .unwrap();
+        mark_changed_stale(&loaded.conn, &pid).unwrap();
+        let status = |id: &str| -> String {
+            loaded
+                .conn
+                .query_row("SELECT status FROM embedding WHERE id=?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(status("a"), "stale");
+        assert_eq!(status("b"), "ready");
     }
 
     #[test]

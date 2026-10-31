@@ -315,15 +315,71 @@ pub fn parse_json_loose<T: serde::de::DeserializeOwned>(raw: &str) -> AppResult<
     }
     let start = trimmed.find(['{', '[']);
     let end = trimmed.rfind(['}', ']']);
+    let mut error = None;
     if let (Some(start), Some(end)) = (start, end) {
         if end > start {
-            return serde_json::from_str::<T>(&trimmed[start..=end])
-                .map_err(|e| AppError::Message(format!("模型返回的 JSON 无法解析：{e}")));
+            match serde_json::from_str::<T>(&trimmed[start..=end]) {
+                Ok(value) => return Ok(value),
+                Err(e) => error = Some(format!("模型返回的 JSON 无法解析：{e}")),
+            }
         }
     }
-    Err(AppError::Message(
-        "模型没有返回可解析的 JSON。请重试，或换用更稳定的模型。".into(),
-    ))
+    // 长输出撞到模型的输出上限时会在中途截断：保住已完整的部分，而不是整层作废。
+    if let Some(value) =
+        close_truncated_json(trimmed).and_then(|fixed| serde_json::from_str::<T>(&fixed).ok())
+    {
+        return Ok(value);
+    }
+    Err(AppError::Message(error.unwrap_or_else(|| {
+        "模型没有返回可解析的 JSON。请重试，或换用更稳定的模型。".into()
+    })))
+}
+
+/// 只在数组元素之间或顶层字段之间截断，避免留下缺字段的半个对象。
+fn element_boundary(stack: &[char]) -> bool {
+    stack.len() == 1 || stack.last() == Some(&'[')
+}
+
+/// 截断的 JSON：丢掉最后一个不完整的元素，再按未闭合的括号补齐。完整或无法修复时返回 None。
+fn close_truncated_json(text: &str) -> Option<String> {
+    let body = &text[text.find(['{', '['])?..];
+    let mut stack: Vec<char> = Vec::new();
+    let (mut in_string, mut escaped) = (false, false);
+    // 最近一个可以安全截断的位置，以及那时仍未闭合的括号。
+    let mut cut: Option<(usize, Vec<char>)> = None;
+    for (index, ch) in body.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' | '[' => stack.push(ch),
+            '}' | ']' => {
+                stack.pop();
+                if stack.is_empty() {
+                    return None;
+                }
+                if element_boundary(&stack) {
+                    cut = Some((index + 1, stack.clone()));
+                }
+            }
+            ',' if element_boundary(&stack) => cut = Some((index, stack.clone())),
+            _ => {}
+        }
+    }
+    let (end, open) = cut?;
+    let mut fixed = body[..end].trim_end().trim_end_matches(',').to_string();
+    for bracket in open.iter().rev() {
+        fixed.push(if *bracket == '{' { '}' } else { ']' });
+    }
+    Some(fixed)
 }
 
 pub fn seed_system_prompt() -> String {
@@ -472,7 +528,7 @@ pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
 3. 关键地点（kind="location"）不少于 {places} 个：地理关系、控制者、资源、危险、在故事中承担的功能。
 4. 关键物品/遗物（kind="item"）不少于 {items} 个：来源、能力、代价、持有者、争夺者。
 5. 历史时间线 timeline 不少于 {history} 条，跨越至少 3 个时代：每条写前因、结果、至今仍在影响什么（consequence）、读者何时得知（revealAt）。
-输出：{{"elements":[{{"kind":"","name":"","role":"在冲突中的功能","summary":"","constraints":[],"secret":"","leverage":"","relations":[{{"target":"","type":"","tension":""}}],"metadata":{{}}}}],"timeline":[{{"title":"","storyTime":"时代/年份","cause":"","participants":[],"outcome":"","consequence":"","revealAt":""}}]}}"#,
+输出（先写 timeline 再写 elements）：{{"timeline":[{{"title":"","storyTime":"时代/年份","cause":"","participants":[],"outcome":"","consequence":"","revealAt":""}}],"elements":[{{"kind":"","name":"","role":"在冲突中的功能","summary":"","constraints":[],"secret":"","leverage":"","relations":[{{"target":"","type":"","tension":""}}],"metadata":{{}}}}]}}"#,
             systems = if epic { "1 至 2 个，主体系必须完整" } else { "1 个" },
             tiers = if epic { 7 } else { 4 },
             rules = if epic { 8 } else { 4 },
@@ -488,7 +544,7 @@ pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
 - metadata：{{"structure":"层级与编制（至少 3 级，写出各级称谓与人数量级）","leader":"首领姓名与外号","doctrine":"信条","resources":"人力/财力/超凡资源","territory":"控制范围","methods":"惯用手段","schism":"内部裂痕与派系","powerAccess":"与能力体系的关系（垄断/限制/研究/走私哪一阶）","recruitment":"如何吸收成员"}}
 - relations：与其他每个主要势力的关系（同盟/敌对/利用/渗透/交易），写清当前矛盾点 tension。
 另补充 timeline：势力间的关键历史事件（战争、背叛、条约、清洗）不少于 {events} 条。
-输出：{{"elements":[...],"timeline":[...]}}，元素字段与前层相同。"#,
+输出（先写 timeline 再写 elements）：{{"timeline":[...],"elements":[...]}}，元素字段与前层相同。relations.target 必须使用已有元素的完整名称。"#,
             factions = if epic { 7 } else { 3 },
             events = if epic { 6 } else { 3 },
         ),
@@ -500,7 +556,8 @@ pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
 - metadata：{{"faction":"所属势力或无","ability":"所用能力体系与阶位，以及标志性用法和代价","background":"塑造此人的关键往事（与历史时间线挂钩）","arc":"起点状态 → 终点状态","voice":"说话方式与口头习惯","wound":"旧伤","misbelief":"对世界或自己的错误信念"}}
 - relations：与至少 3 个其他人物或势力的关系，写清 tension（利益冲突、恩怨、亏欠、误会）。主角与每个对手之间必须存在无法两全的目标冲突。
 - 对手必须有自己合理甚至令人同情的理由，以及推进中的计划，而不是等主角上门。
-输出：{{"elements":[...]}}，元素字段与前层相同。"#,
+作者已确认的人物必须原样保留身份、目标与秘密，只能补充细节；新人物不得取代他们在故事中的功能。
+输出：{{"elements":[...]}}，元素字段与前层相同。relations.target 必须使用已有元素的完整名称。"#,
             cast = if epic { 12 } else { 5 },
         ),
         "synthesis" => format!(
@@ -509,7 +566,7 @@ pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
 - title、coreDramaticQuestion（某人能否在某种代价下达成某目标）、narrativePromise、openingState、endingState、themeQuestion。
 - threads 不少于 {threads} 条：main 主线、relationship 关系线、mystery 谜团线（targetState 中写出谜底）、faction 势力线、theme 主题线。每条写 dramaticQuestion、openingState、targetState、stakes，并说明它与哪条线互相施压。
 - timeline：故事开局前后的“暗线时间表”不少于 {plans} 条——隐藏对手与各势力在主角不知情时正在推进的计划步骤，每条写 storyTime、cause、outcome、consequence，以及主角/读者何时发现（revealAt）。
-输出：{{"title":"","coreDramaticQuestion":"","narrativePromise":"","openingState":"","endingState":"","themeQuestion":"","threads":[{{"kind":"","title":"","dramaticQuestion":"","openingState":"","targetState":"","stakes":""}}],"timeline":[...]}}"#,
+输出：{{"title":"","coreDramaticQuestion":"","narrativePromise":"","openingState":"","endingState":"","themeQuestion":"","timeline":[...],"threads":[{{"kind":"","title":"","dramaticQuestion":"","openingState":"","targetState":"","stakes":""}}]}}"#,
             threads = if epic { 6 } else { 3 },
             plans = if epic { 8 } else { 4 },
         ),
@@ -521,6 +578,7 @@ pub fn world_layer_system_prompt(layer: &str, scale: &str) -> String {
 4. 时间线：先后矛盾、历史事件没有留下后果、暗线计划与开局状态冲突。
 5. 空泛条目：只有氛围没有功能的设定。
 6. 结构缺口：缺少能支撑长篇的冲突来源、中段没有升级空间。
+7. 正典一致性：逐条对照“作者已确认的故事资料”，人物的身份、秘密、目标和世界规则有没有被改写、替换或转移给新人物。发现即用 patch 恢复作者原设定，再把新增细节嫁接到原设定上。
 修复方式：直接给出修订后的完整条目（同名同类替换），必要时新增条目；不得删除作者已确认的设定。
 输出：{"issues":[{"target":"条目名","problem":"问题","fix":"修复思路"}],"patch":{"elements":[完整元素],"timeline":[完整事件],"threads":[完整叙事线]}}"#
             .to_string(),
@@ -618,10 +676,23 @@ pub fn narrative_chain_system_prompt() -> String {
         .into()
 }
 
-pub fn narrative_chain_user_prompt(foundation: &Value, medium: &str, strategy: &str) -> String {
+pub fn narrative_chain_user_prompt(
+    foundation: &Value,
+    medium: &str,
+    strategy: &str,
+    canon: &str,
+    premise: &Value,
+) -> String {
+    let length = premise
+        .get("targetLength")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("未指定");
     format!(
-        "已建立叙事地基：\n{foundation}\n\n媒介：{medium}\n编排策略：{strategy}\n\n\
-         请生成完整因果链。{game_rule}",
+        "作者已确认的正典（人物身份、秘密与规则不得改写，只能在其上展开）：\n{canon}\n\n\
+         已建立叙事地基：\n{foundation}\n\n媒介：{medium}\n编排策略：{strategy}\n目标篇幅：{length}\n\n\
+         请生成完整因果链。篇幅是多卷长篇时，故事时间跨度、对手计划与世界揭示要逐卷推进，\
+         每一卷结尾都要有阶段性胜负与一个更大的新问题，不要把全部矛盾压在几天之内解决。{game_rule}",
         game_rule = if medium == "game" {
             "这是游戏作品，每个节点都必须有 presentations 呈现契约。"
         } else {
@@ -998,7 +1069,9 @@ impl LlmClient {
 pub fn is_tool_protocol_unsupported(message: &str) -> bool {
     let lower = message.to_lowercase();
     (lower.contains("400") || lower.contains("422") || lower.contains("not support"))
-        && ["tool", "function"].iter().any(|needle| lower.contains(needle))
+        && ["tool", "function"]
+            .iter()
+            .any(|needle| lower.contains(needle))
 }
 
 #[cfg(test)]
@@ -1011,7 +1084,9 @@ mod tests {
     #[test]
     fn accumulates_streamed_tool_call_fragments() {
         let mut calls = ToolCallAccumulator::default();
-        calls.push(&json!([{"index":0,"id":"call_a","function":{"name":"read_","arguments":"{\"pa"}}]));
+        calls.push(
+            &json!([{"index":0,"id":"call_a","function":{"name":"read_","arguments":"{\"pa"}}]),
+        );
         calls.push(&json!([{"index":0,"function":{"name":"path","arguments":"th\":\"/人物\"}"}}]));
         calls.push(&json!([{"index":1,"function":{"name":"search","arguments":"{}"}}]));
         let calls = calls.finish();
@@ -1026,7 +1101,9 @@ mod tests {
         assert!(is_tool_protocol_unsupported(
             "模型服务返回 400：This model does not support tools"
         ));
-        assert!(!is_tool_protocol_unsupported("模型服务返回 401：invalid key"));
+        assert!(!is_tool_protocol_unsupported(
+            "模型服务返回 401：invalid key"
+        ));
     }
 
     #[test]
@@ -1042,6 +1119,19 @@ mod tests {
         let raw = "好的，如下：\n```json\n{\"a\": 1}\n```\n";
         let value: Value = parse_json_loose(raw).unwrap();
         assert_eq!(value["a"], 1);
+    }
+
+    #[test]
+    fn salvages_json_cut_off_by_output_limit() {
+        let raw =
+            r#"{"elements":[{"name":"千灯台","summary":"演夜戏, 守七盏灯"},{"name":"司命府","summ"#;
+        let value: Value = parse_json_loose(raw).unwrap();
+        assert_eq!(value["elements"].as_array().unwrap().len(), 1);
+        assert_eq!(value["elements"][0]["summary"], "演夜戏, 守七盏灯");
+        let nested = r#"[{"a":[1,2,{"b":"x]"}],"c":"#;
+        let value: Value = parse_json_loose(nested).unwrap();
+        assert_eq!(value[0]["a"][2]["b"], "x]");
+        assert!(parse_json_loose::<Value>("完全不是 JSON").is_err());
     }
 
     #[test]

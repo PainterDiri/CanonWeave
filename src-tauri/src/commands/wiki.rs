@@ -77,7 +77,7 @@ pub async fn wiki_compile_llm(
                             job.title
                         )),
                     ],
-                    Some(900),
+                    Some(client.max_tokens.max(4000)),
                 )
                 .await;
             match result {
@@ -125,7 +125,8 @@ pub async fn wiki_compile_llm(
                             chunk_summaries.join("\n")
                         )),
                     ],
-                    Some(1400),
+                    // 推理型模型的思考也计入输出上限，太小会在给出答案前被截断。
+            Some(client.max_tokens.max(6000)),
                 )
                 .await
         };

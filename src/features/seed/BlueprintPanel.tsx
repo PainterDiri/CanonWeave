@@ -929,7 +929,11 @@ function ElementEditor({
   onSave: (element: NarrativeElement) => Promise<void>;
 }) {
   const [form, setForm] = useState<NarrativeElement | null>(element);
-  useEffect(() => setForm(element), [element]);
+  const [relationsText, setRelationsText] = useState("");
+  useEffect(() => {
+    setForm(element);
+    setRelationsText(relationsToText(element?.relations));
+  }, [element]);
   if (!form) return null;
   const set = (key: keyof NarrativeElement, value: string | string[]) =>
     setForm((current) => (current ? { ...current, [key]: value } : current));
@@ -942,7 +946,7 @@ function ElementEditor({
       footer={
         <>
           <Button tone="ghost" onClick={() => onOpenChange(false)}>取消</Button>
-          <Button tone="primary" disabled={saving} onClick={() => void onSave(form)}>
+          <Button tone="primary" disabled={saving} onClick={() => void onSave({ ...form, relations: textToRelations(relationsText) })}>
             {saving ? "保存中…" : "保存并重新诊断"}
           </Button>
         </>
@@ -966,9 +970,29 @@ function ElementEditor({
         <Field label="硬约束" hint="每行一条">
           <Textarea rows={3} value={form.constraints.join("\n")} onChange={(e) => set("constraints", e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} />
         </Field>
+        <Field label="关系" hint="每行：对象｜关系｜张力；对象需与蓝本中的条目同名">
+          <Textarea rows={4} value={relationsText} onChange={(e) => setRelationsText(e.target.value)} />
+        </Field>
       </div>
     </Modal>
   );
+}
+
+type RelationLine = { target?: string; type?: string; tension?: string };
+
+function relationsToText(relations: unknown) {
+  if (!Array.isArray(relations)) return "";
+  return (relations as RelationLine[])
+    .map((item) => [item.target ?? "", item.type ?? "", item.tension ?? ""].join("｜"))
+    .join("\n");
+}
+
+function textToRelations(text: string): RelationLine[] {
+  return text
+    .split("\n")
+    .map((line) => line.split(/[｜|]/).map((part) => part.trim()))
+    .filter(([target]) => Boolean(target))
+    .map(([target, type = "", ...rest]) => ({ target, type, tension: rest.join("｜") }));
 }
 
 function TimelineEditor({

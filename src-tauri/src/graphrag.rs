@@ -577,7 +577,7 @@ pub fn mark_stale(conn: &Connection, project_id: &str) -> AppResult<()> {
         "UPDATE wiki_page SET stale_at=COALESCE(stale_at,?2) WHERE project_id=?1",
         params![project_id, ts],
     )?;
-    crate::embedding::mark_all_stale(conn, project_id)?;
+    crate::embedding::mark_changed_stale(conn, project_id)?;
     Ok(())
 }
 

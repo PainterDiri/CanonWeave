@@ -1,0 +1,4 @@
+# macOS 开发：启动前用 Apple Development 证书重新签名，让钥匙串授权跨重编译保留（见 scripts/dev-run.sh）。
+# 没有该证书的机器上 runner 只是原样启动。
+[target.'cfg(target_os = "macos")']
+runner = "../scripts/dev-run.sh"

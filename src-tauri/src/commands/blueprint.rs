@@ -231,15 +231,70 @@ async fn build_foundation(
         } else {
             merge_layer(&mut foundation, &parsed);
         }
+        // 输出过长被截断时，排在后面的时间线最容易丢：单独补一次。
+        let timeline_missing = parsed
+            .get("timeline")
+            .and_then(Value::as_array)
+            .map_or(true, Vec::is_empty);
+        if matches!(*layer, "world" | "synthesis") && timeline_missing {
+            emit_progress(
+                app,
+                index + 1,
+                total_steps,
+                &format!("正在补全{label}的时间线"),
+            );
+            if let Ok(raw) = complete_blueprint_request(
+                client,
+                &[
+                    ChatTurn::system(world_layer_system_prompt(layer, scale)),
+                    ChatTurn::user(format!(
+                        "{}\n\n上一次输出被截断，时间线丢失。这次只输出 {{\"timeline\":[...]}}，不要重复元素。",
+                        world_layer_user_prompt(layer, premise, medium, canon, &foundation)
+                    )),
+                ],
+                client.max_tokens.max(9000),
+            )
+            .await
+            {
+                if let Ok(extra) = parse_json_loose::<Value>(&raw) {
+                    merge_layer(&mut foundation, &extra);
+                }
+            }
+        }
     }
+    resolve_relation_targets(&mut foundation);
     Ok(foundation)
 }
 
 /// 作者已确认的人物、实体、知识条目与守则：分层生成时必须保留并扩展。
+/// 人物的欲望、恐惧、秘密等核心字段也要带上，否则模型只看到一句简介，会把作者定好的身份反转改掉。
 fn canon_context(conn: &rusqlite::Connection, project_id: &str) -> Result<String, String> {
     let mut parts = Vec::new();
+    let characters = crate::entities::characters(conn, project_id).map_err(|e| e.to_string())?;
+    for character in characters.iter().take(40) {
+        let mut line = format!(
+            "- [人物] {}：{}",
+            character.entity.canonical_name, character.entity.description
+        );
+        for (label, value) in [
+            ("想要", &character.desire),
+            ("需要", &character.need),
+            ("恐惧", &character.fear),
+            ("缺陷", &character.flaw),
+            ("秘密", &character.secret),
+        ] {
+            if !value.trim().is_empty() {
+                line.push_str(&format!("｜{label}：{}", value.trim()));
+            }
+        }
+        parts.push(line);
+    }
     let entities = crate::entities::list(conn, project_id, None).map_err(|e| e.to_string())?;
-    for entity in entities.iter().take(80) {
+    for entity in entities
+        .iter()
+        .filter(|entity| entity.entity_type != "character")
+        .take(60)
+    {
         parts.push(format!(
             "- [{}] {}：{}",
             entity.entity_type, entity.canonical_name, entity.description
@@ -259,6 +314,61 @@ fn canon_context(conn: &rusqlite::Connection, project_id: &str) -> Result<String
     } else {
         parts.join("\n")
     })
+}
+
+/// 关系目标常写成元素名的简称或别的括注（“七盏灯”对“七盏灯（含第七盏）”），按去括注后的名字对齐到已有元素。
+fn resolve_relation_targets(foundation: &mut Value) {
+    fn bare(name: &str) -> String {
+        let name = name.trim();
+        let cut = name.find(['（', '(']).unwrap_or(name.len());
+        name[..cut].trim().to_string()
+    }
+    let names: Vec<String> = foundation["elements"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("name").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let resolve = |target: &str| -> Option<String> {
+        if names.iter().any(|name| name == target) {
+            return None;
+        }
+        let wanted = bare(target);
+        if wanted.chars().count() < 2 {
+            return None;
+        }
+        names
+            .iter()
+            .find(|name| bare(name) == wanted)
+            .or_else(|| {
+                names
+                    .iter()
+                    .find(|name| bare(name).contains(&wanted) || wanted.contains(&bare(name)))
+            })
+            .cloned()
+    };
+    let Some(elements) = foundation["elements"].as_array_mut() else {
+        return;
+    };
+    for element in elements {
+        let Some(relations) = element.get_mut("relations").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for relation in relations {
+            let target = relation
+                .get("target")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if let Some(name) = resolve(&target) {
+                relation["target"] = Value::String(name);
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -347,6 +457,8 @@ pub async fn blueprint_generate(
                 &foundation,
                 &input.medium,
                 &input.structure_strategy,
+                &canon,
+                &premise,
             )),
         ],
         client.max_tokens.max(9000),
@@ -521,5 +633,23 @@ mod tests {
         assert_eq!(timeline.len(), 2);
         assert_eq!(timeline[1]["orderNo"], 2);
         assert_eq!(foundation["title"], "雨夜");
+    }
+
+    #[test]
+    fn resolves_relation_targets_written_as_short_names() {
+        let mut foundation = json!({"elements":[
+            {"kind":"item","name":"七盏灯（含第七盏）","relations":[]},
+            {"kind":"location","name":"打铁巷漏口（西三坊）","relations":[]},
+            {"kind":"concept","name":"末角·引路","relations":[
+                {"target":"七盏灯"},
+                {"target":"打铁巷漏口（地点）"},
+                {"target":"不存在的地方"}
+            ]}
+        ]});
+        resolve_relation_targets(&mut foundation);
+        let relations = &foundation["elements"][2]["relations"];
+        assert_eq!(relations[0]["target"], "七盏灯（含第七盏）");
+        assert_eq!(relations[1]["target"], "打铁巷漏口（西三坊）");
+        assert_eq!(relations[2]["target"], "不存在的地方");
     }
 }

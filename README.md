@@ -94,16 +94,11 @@ npm start                   # 已安装依赖时直接启动
 
 ### macOS 开发签名
 
-`tauri dev` 的临时二进制每次重新链接后都会获得新的 ad-hoc 代码哈希，macOS 会因此再次要求授权读取 API Key。需要频繁联调模型时，可创建一次本地签名身份，并使用稳定签名的调试应用：
+`tauri dev` 的临时二进制每次重新链接后都会获得新的代码哈希。macOS 钥匙串对没有 Apple 团队 ID 的签名（ad-hoc 或自签名证书）按代码哈希放行，所以每次重编译后第一次读取 API Key 都会再次要求输入密码。
 
-```bash
-npm run macos:setup-signing  # 每个 macOS 用户执行一次
-npm run dev:macos            # 重新构建、稳定签名并打开调试应用
-```
+想避免这一步，在 Xcode → Settings → Accounts 用 Apple ID 登录（免费个人团队即可），点 Manage Certificates → + → Apple Development。之后 `npm run tauri dev`、`CanonWeave.command` 启动前，`src-tauri/.cargo/config.toml` 里的 runner（`scripts/dev-run.sh`）会自动用这张证书重新签名；第一次读取 Key 时选“始终允许”，以后重编译也不会再问。证书名称也可用环境变量 `CANONWEAVE_SIGNING_IDENTITY` 指定。
 
-应用启动和打开设置页都不会再读取 Key；普通启动即使不做稳定签名，也只会在第一次真正调用模型时请求钥匙串权限。
-
-首次读取 Key 时在系统对话框中选“始终允许”，后续重新构建仍会复用同一代码签名身份。签名私钥与信任证书只写入 macOS 钥匙串，临时证书文件会在脚本结束时删除，不会进入仓库。
+应用启动和打开设置页不会读取 Key；本地 Embedding 也不读取 Key，只有真正调用模型或 API 模式 Embedding 时才会请求钥匙串权限。不重编译时，同一个应用在“始终允许”后不会再询问。
 
 ## 第一次使用
 

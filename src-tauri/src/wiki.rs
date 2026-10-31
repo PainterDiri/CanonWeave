@@ -249,7 +249,7 @@ fn build_character(
         body.push_str("\n## 关系\n");
         for (relation_id, relation_type, target, evidence) in relations {
             page.source(Some(&relation_id), evidence.as_deref());
-            body.push_str(&format!("- {target}：{relation_type}（{relation_id}）\n"));
+            body.push_str(&format!("- {target}：{relation_type}\n"));
         }
     }
     let claims = claim_lines(conn, project_id, id, branch_id, &mut page)?;
@@ -324,7 +324,7 @@ fn build_place(
         body.push_str("\n## 地理与势力关系\n");
         for (relation_id, relation_type, target, evidence) in relations {
             page.source(Some(&relation_id), evidence.as_deref());
-            body.push_str(&format!("- {target}：{relation_type}（{relation_id}）\n"));
+            body.push_str(&format!("- {target}：{relation_type}\n"));
         }
     }
     let mut stmt = conn.prepare(
@@ -981,7 +981,7 @@ pub fn rebuild(conn: &mut Connection, project_id: &str) -> AppResult<WikiRebuild
     }
     {
         let mut stmt = conn.prepare(
-            "SELECT e.id, e.entity_id, d.name, e.name, e.aliases, e.summary, e.fields
+            "SELECT e.id, e.entity_id, d.name, e.name, e.aliases, e.summary, e.fields, d.key
              FROM knowledge_entry e JOIN knowledge_domain d ON d.id=e.domain_id
              WHERE e.project_id=?1 ORDER BY d.sort_order, e.name",
         )?;
@@ -995,18 +995,25 @@ pub fn rebuild(conn: &mut Connection, project_id: &str) -> AppResult<WikiRebuild
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
-        for (entry_id, entity_id, domain, name, aliases, summary, fields) in rows {
+        for (entry_id, entity_id, domain, name, aliases, summary, fields, domain_key) in rows {
             let aliases = json_list(&aliases);
             let fields = serde_json::from_str::<Value>(&fields)
                 .ok()
                 .and_then(|value| serde_json::to_string_pretty(&value).ok())
                 .unwrap_or(fields);
+            // 环境域条目就是地点，归进百科的“地点”分类。
+            let kind = if domain_key == "environment" {
+                "place"
+            } else {
+                "knowledge"
+            };
             let mut page = DraftPage::new(
-                "knowledge",
+                kind,
                 format!("{domain} · {name}"),
                 format!(
                     "知识域：{domain}\n\n{}\n\n别名：{}\n\n结构化字段：\n{fields}",

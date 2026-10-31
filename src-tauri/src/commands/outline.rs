@@ -21,7 +21,8 @@ use crate::{
 
 const MAX_VOLUMES: i32 = 40;
 const MAX_CHAPTERS: i32 = 1200;
-const CHAPTER_BATCH: i32 = 16;
+// 每批章节数：章节工艺字段多，批次过大容易撞上模型的单次输出上限。
+const CHAPTER_BATCH: i32 = 8;
 
 #[derive(Debug, Clone)]
 struct VolumeRequest {

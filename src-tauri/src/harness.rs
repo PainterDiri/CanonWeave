@@ -135,12 +135,13 @@ pub fn registry() -> Vec<HarnessTool> {
 - promise: {\"title\":\"\",\"window\":\"计划兑现章节范围\",\"contract\":\"怎样才算兑现\"}\n\
 - knowledge_entry: {\"domainKey\":\"environment|item|faction|power|worldrule|自定义域 key\",\"name\":\"\",\"aliases\":[],\"summary\":\"\",\"fields\":{}}\n\
 - outline_patch: {\"level\":\"volume|chapter\",\"orderNo\":1,\"title\":\"\",\"goal\":\"\",\"conflict\":\"\",\"turn\":\"\",\"payoff\":\"\"}\n\
+- entity_patch：修订已存在的人物/实体，{\"canonicalName\":\"已有名称\",\"description\":\"\",\"desire\":\"\",\"need\":\"\",\"fear\":\"\",\"flaw\":\"\",\"secret\":\"\"}，只填要改的字段\n\
 evidence_quote：若内容来自项目原文，逐字复制 read_path/search 返回的片段（至少 4 个字）；若是你的创意建议则留空，并在 reason 中说明。",
             tier: Tier::Propose,
             schema: json!({
                 "type":"object",
                 "properties":{
-                    "kind":{"type":"string","enum":["entity","relation","claim","event","promise","knowledge_entry","outline_patch"]},
+                    "kind":{"type":"string","enum":["entity","entity_patch","relation","claim","event","promise","knowledge_entry","outline_patch"]},
                     "payload":{"type":"object"},
                     "evidence_quote":{"type":"string"},
                     "reason":{"type":"string"}
@@ -167,6 +168,32 @@ evidence_quote：若内容来自项目原文，逐字复制 read_path/search 返
                     "reason":{"type":"string"}
                 },
                 "required":["chapter","reason"]
+            }),
+        },
+        HarnessTool {
+            name: "propose_blueprint_patch",
+            description: "对尚未确认的叙事蓝本提出逐字段修订候选：设定/人物条目（按名称）或因果节点（按序号）。用于修复审稿中发现的矛盾、年代、代价不合规等问题。每处只改一个字段，写出完整新文本；作者确认后才写入并重新诊断。",
+            tier: Tier::Propose,
+            schema: json!({
+                "type":"object",
+                "properties":{
+                    "changes":{
+                        "type":"array",
+                        "items":{
+                            "type":"object",
+                            "properties":{
+                                "target":{"type":"string","enum":["element","node"]},
+                                "name":{"type":"string","description":"target=element 时的条目名称"},
+                                "order":{"type":"integer","description":"target=node 时的节点序号"},
+                                "field":{"type":"string","description":"element：summary/role/externalGoal/internalNeed/fear/flaw/leverage/secret；node：title/cause/choice/cost/outcome/stateChange/knowledgeChange/storyTime/location"},
+                                "value":{"type":"string","description":"该字段修订后的完整文本"}
+                            },
+                            "required":["target","field","value"]
+                        }
+                    },
+                    "reason":{"type":"string"}
+                },
+                "required":["changes","reason"]
             }),
         },
         HarnessTool {
@@ -395,6 +422,14 @@ pub fn text_protocol_instructions(mode: &str) -> String {
     text
 }
 
+/// 模型把原生函数调用标记（如 DeepSeek 的 DSML、未闭合的 tool_call）当正文输出时为真。
+pub fn leaked_tool_markup(text: &str) -> bool {
+    ["DSML", "<tool_call>", "<|tool_call", "<｜tool"]
+        .iter()
+        .any(|marker| text.contains(marker))
+        || (text.contains("invoke name=") && text.contains("parameter name="))
+}
+
 pub fn parse_text_tool_calls(text: &str) -> (String, Vec<ToolCall>) {
     let pattern = Regex::new(r"(?s)<tool_call>\s*(.*?)\s*</tool_call>").expect("valid regex");
     let mut calls = Vec::new();
@@ -458,7 +493,7 @@ pub fn system_prompt(conn: &Connection, project_id: &str, mode: &str) -> AppResu
 4. 证据纪律：来自项目原文的事实，evidence_quote 必须逐字复制工具返回的原文；你的创意建议不填 evidence_quote，并在 reason 里写明“建议”。
 5. 区分真值层：world 客观事实、belief 角色相信、utterance 角色声称、narrative 叙述者给出、planned 作者计划揭示。
 6. 关键创作取舍（结局走向、人物生死、核心设定、主线分叉）用 ask_author 给出 2 至 4 个选项，由作者拍板。
-7. 作者用自然语言提出需求时直接调用对应工具：种子卡三方向用 generate_seed，叙事蓝本用 generate_blueprint，卷章骨架用 generate_outline，蓝本确认后落入资料库用 sync_blueprint，文笔方案用 recommend_style，人物/地点/势力/关系/事件/伏笔/知识条目用 propose_change，新知识域用 propose_knowledge_domain，章节工艺用 propose_craft，叙事线程用 propose_thread，正文草稿用 propose_draft，作者守则用 propose_guide。
+7. 作者用自然语言提出需求时直接调用对应工具：种子卡三方向用 generate_seed，叙事蓝本用 generate_blueprint，卷章骨架用 generate_outline，蓝本确认后落入资料库用 sync_blueprint，文笔方案用 recommend_style，人物/地点/势力/关系/事件/伏笔/知识条目用 propose_change，新知识域用 propose_knowledge_domain，章节工艺用 propose_craft，未确认蓝本里的条目或因果节点需要修订时用 propose_blueprint_patch（逐字段给出完整新文本），叙事线程用 propose_thread，正文草稿用 propose_draft，作者守则用 propose_guide。
    - 作者还没有说出自己的灵感或要求时，绝不替作者编造：先用一两句话问清楚（或 ask_author 给出选项），拿到作者原话后再生成。
    - 生成蓝本前确认种子卡已确认；生成卷章前确认蓝本已确认。前置条件不满足时说明缺什么，并引导作者在确认卡中完成确认。
 8. 作者守则优先于你的偏好；发现请求与守则冲突时先指出冲突。
@@ -573,6 +608,12 @@ pub fn tool_title(name: &str, args: &Value) -> String {
                 .unwrap_or_default()
         ),
         "propose_thread" => format!("提出叙事线程 · {}", text("title")),
+        "propose_blueprint_patch" => format!(
+            "提出蓝本修订 · {} 处",
+            args.get("changes")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len)
+        ),
         "propose_draft" => format!(
             "起草正文 · 第 {} 章",
             args.get("chapter")
@@ -603,6 +644,8 @@ fn kind_label(kind: &str) -> &'static str {
         "promise" => "伏笔",
         "knowledge_entry" => "知识条目",
         "outline_patch" => "大纲节点",
+        "blueprint_patch" => "蓝本修订",
+        "entity_patch" => "人物修订",
         _ => "资料",
     }
 }
@@ -645,6 +688,7 @@ pub fn execute(ctx: &ToolContext<'_>, call: &ToolCall) -> ToolOutcome {
         "run_audit" => run_audit(ctx),
         "propose_change" => propose_change(ctx, &args),
         "propose_craft" => propose_craft(ctx, &args),
+        "propose_blueprint_patch" => propose_blueprint_patch(ctx, &args),
         "propose_thread" => propose_thread(ctx, &args),
         "propose_draft" => propose_draft(ctx, &args),
         "propose_guide" => propose_guide(ctx, &args),
@@ -863,8 +907,35 @@ fn read_path(ctx: &ToolContext<'_>, args: &Value) -> AppResult<ToolOutcome> {
                     view.blueprint.opening_state,
                     view.blueprint.ending_state
                 );
-                for element in view.elements.iter().take(30) {
-                    text.push_str(&format!("- [{}] {}：{}\n", element.kind, element.name, element.summary));
+                // 候选蓝本要能被 Agent 完整审阅：元素带秘密，另列叙事线与全部因果节点（用 offset 分页）。
+                text.push_str("\n## 设定条目\n");
+                for element in &view.elements {
+                    text.push_str(&format!("- [{}] {}：{}", element.kind, element.name, element.summary));
+                    if !element.secret.trim().is_empty() {
+                        text.push_str(&format!("｜秘密：{}", element.secret));
+                    }
+                    text.push('\n');
+                }
+                text.push_str("\n## 叙事线\n");
+                for thread in &view.threads {
+                    text.push_str(&format!(
+                        "- [{}] {}：{} → {}\n",
+                        thread.kind, thread.title, thread.opening_state, thread.target_state
+                    ));
+                }
+                text.push_str("\n## 因果链\n");
+                for node in &view.nodes {
+                    text.push_str(&format!(
+                        "{}. [{}] {}（{}）\n   前因：{}\n   选择：{}\n   代价：{}\n   结果：{}\n",
+                        node.order_no,
+                        node.kind,
+                        node.title,
+                        node.story_time,
+                        node.cause,
+                        node.choice,
+                        node.cost,
+                        node.outcome
+                    ));
                 }
                 text
             } else {
@@ -1010,8 +1081,29 @@ fn read_path(ctx: &ToolContext<'_>, args: &Value) -> AppResult<ToolOutcome> {
         }
         (other, _) => return Err(AppError::Message(format!("未知路径：/{other}"))),
     };
-    let summary = format!("{} 字", content.chars().count());
-    Ok(ToolOutcome::ok(content, summary))
+    // 蓝本、审计等长视图与章节正文一样按 offset/limit 分页，否则后半部分永远读不到。
+    let total = content.chars().count();
+    let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(PAGE_CHARS)
+        .clamp(200, MAX_TOOL_CHARS - 200);
+    if total <= limit && offset == 0 {
+        return Ok(ToolOutcome::ok(content, format!("{total} 字")));
+    }
+    let page: String = content.chars().skip(offset).take(limit).collect();
+    let end = (offset + page.chars().count()).min(total);
+    let more = if end < total {
+        format!("\n\n（共 {total} 字，显示 {offset}-{end}；继续读取用 offset={end}）")
+    } else {
+        format!("\n\n（共 {total} 字，已读到结尾）")
+    };
+    Ok(ToolOutcome::ok(
+        format!("{page}{more}"),
+        format!("{offset}-{end} / {total} 字"),
+    ))
 }
 
 fn read_outline(conn: &Connection, pid: &str, chapter: Option<i32>) -> AppResult<String> {
@@ -1375,18 +1467,100 @@ fn reason_of(args: &Value) -> String {
         .to_string()
 }
 
+const ENTITY_PATCH_FIELDS: [&str; 6] = ["description", "desire", "need", "fear", "flaw", "secret"];
+
+/// 修订已存在的实体：记下修订前的值与更新时间，作者确认时据此防止覆盖期间的改动。
+fn propose_entity_patch(
+    ctx: &ToolContext<'_>,
+    args: &Value,
+    payload: &Value,
+) -> AppResult<ToolOutcome> {
+    let name = payload
+        .get("canonicalName")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim();
+    let found = ctx
+        .conn
+        .query_row(
+            "SELECT e.id, e.updated_at, e.description, COALESCE(c.desire,''), COALESCE(c.need,''),
+                COALESCE(c.fear,''), COALESCE(c.flaw,''), COALESCE(c.secret,'')
+             FROM entity e LEFT JOIN character_core c ON c.entity_id=e.id
+             WHERE e.project_id=?1 AND e.canonical_name=?2",
+            rusqlite::params![ctx.project_id, name],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    (2..8)
+                        .map(|index| row.get::<_, String>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((entity_id, updated_at, before_values)) = found else {
+        return Ok(ToolOutcome::error(format!(
+            "找不到实体「{name}」；新实体请用 kind=entity"
+        )));
+    };
+    let mut changes = serde_json::Map::new();
+    let mut before = serde_json::Map::new();
+    for (field, old) in ENTITY_PATCH_FIELDS.iter().zip(before_values) {
+        if let Some(value) = payload.get(*field).and_then(Value::as_str).map(str::trim) {
+            if !value.is_empty() && value != old {
+                changes.insert((*field).into(), Value::String(value.into()));
+                before.insert((*field).into(), Value::String(old));
+            }
+        }
+    }
+    if changes.is_empty() {
+        return Ok(ToolOutcome::error("没有与现有内容不同的修订字段"));
+    }
+    let count = changes.len();
+    let candidate = crate::candidates::insert(
+        ctx.conn,
+        ctx.project_id,
+        "entity_patch",
+        json!({
+            "entityId": entity_id,
+            "canonicalName": name,
+            "changes": changes,
+            "before": before,
+            "baseUpdatedAt": updated_at,
+            "agentReason": reason_of(args)
+        }),
+        None,
+        None,
+        0.6,
+    )?;
+    link_candidate(ctx, &candidate.id)?;
+    Ok(ToolOutcome {
+        content: format!(
+            "已创建「{name}」的修订候选 {}（{count} 个字段），等待作者确认。",
+            candidate.id
+        ),
+        summary: format!("{name} · {count} 个字段"),
+        candidate_ids: vec![candidate.id],
+        ..ToolOutcome::default()
+    })
+}
+
 fn propose_change(ctx: &ToolContext<'_>, args: &Value) -> AppResult<ToolOutcome> {
     let kind = args.get("kind").and_then(Value::as_str).unwrap_or_default();
     let mut payload = args.get("payload").cloned().unwrap_or_else(|| json!({}));
     if !payload.is_object() {
         return Ok(ToolOutcome::error("payload 必须是对象"));
     }
+    if kind == "entity_patch" {
+        return propose_entity_patch(ctx, args, &payload);
+    }
     if let Err(reason) = crate::agent::validate_proposal(kind, &payload) {
         return Ok(ToolOutcome::error(reason));
     }
     if crate::agent::duplicate_proposal(ctx.conn, ctx.project_id, kind, &payload)? {
         return Ok(ToolOutcome::error(format!(
-            "「{}」与已有权威记录或待审候选重复，不再提出。",
+            "「{}」与已有权威记录或待审候选重复，不再提出；要修订已有条目请用 kind=entity_patch。",
             crate::agent::proposal_title(kind, &payload)
         )));
     }
@@ -1534,6 +1708,156 @@ fn propose_craft(ctx: &ToolContext<'_>, args: &Value) -> AppResult<ToolOutcome> 
             candidate.id
         ),
         summary: format!("第 {number} 章 · {} 个字段", changes.len()),
+        candidate_ids: vec![candidate.id],
+        ..ToolOutcome::default()
+    })
+}
+
+/// 蓝本字段名（camelCase）→ 列名；只开放文本字段，结构（关系、边）仍由作者在蓝本面板编辑。
+pub(crate) fn blueprint_patch_column(target: &str, field: &str) -> Option<&'static str> {
+    match (target, field) {
+        ("element", "summary") => Some("summary"),
+        ("element", "role") => Some("role"),
+        ("element", "externalGoal") => Some("external_goal"),
+        ("element", "internalNeed") => Some("internal_need"),
+        ("element", "fear") => Some("fear"),
+        ("element", "flaw") => Some("flaw"),
+        ("element", "leverage") => Some("leverage"),
+        ("element", "secret") => Some("secret"),
+        ("node", "title") => Some("title"),
+        ("node", "cause") => Some("cause"),
+        ("node", "choice") => Some("choice"),
+        ("node", "cost") => Some("cost"),
+        ("node", "outcome") => Some("outcome"),
+        ("node", "stateChange") => Some("state_change"),
+        ("node", "knowledgeChange") => Some("knowledge_change"),
+        ("node", "storyTime") => Some("story_time"),
+        ("node", "location") => Some("location"),
+        _ => None,
+    }
+}
+
+fn propose_blueprint_patch(ctx: &ToolContext<'_>, args: &Value) -> AppResult<ToolOutcome> {
+    if crate::blueprint::current(ctx.conn, ctx.project_id)?.is_some() {
+        return Ok(ToolOutcome::error(
+            "蓝本已确认，不能再静默修改；请让作者在蓝本面板中处理。",
+        ));
+    }
+    let Some(view) = crate::blueprint::candidate(ctx.conn, ctx.project_id)? else {
+        return Ok(ToolOutcome::error("还没有候选蓝本。"));
+    };
+    let requested = args
+        .get("changes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if requested.is_empty() {
+        return Ok(ToolOutcome::error("没有给出任何修订"));
+    }
+    let mut changes = Vec::new();
+    let mut problems = Vec::new();
+    for change in &requested {
+        let target = change
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let field = change
+            .get("field")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let value = change
+            .get("value")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if value.is_empty() || blueprint_patch_column(target, field).is_none() {
+            problems.push(format!("{target}.{field}：字段不可修订或内容为空"));
+            continue;
+        }
+        let (id, label, before) = if target == "element" {
+            let name = change
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let Some(element) = view.elements.iter().find(|item| item.name == name) else {
+                problems.push(format!("找不到条目「{name}」"));
+                continue;
+            };
+            let before = match field {
+                "summary" => &element.summary,
+                "role" => &element.role,
+                "externalGoal" => &element.external_goal,
+                "internalNeed" => &element.internal_need,
+                "fear" => &element.fear,
+                "flaw" => &element.flaw,
+                "leverage" => &element.leverage,
+                _ => &element.secret,
+            };
+            (element.id.clone(), element.name.clone(), before.clone())
+        } else {
+            let order = change.get("order").and_then(Value::as_i64).unwrap_or(-1) as i32;
+            let Some(node) = view.nodes.iter().find(|item| item.order_no == order) else {
+                problems.push(format!("找不到第 {order} 号节点"));
+                continue;
+            };
+            let before = match field {
+                "title" => &node.title,
+                "cause" => &node.cause,
+                "choice" => &node.choice,
+                "cost" => &node.cost,
+                "outcome" => &node.outcome,
+                "stateChange" => &node.state_change,
+                "knowledgeChange" => &node.knowledge_change,
+                "storyTime" => &node.story_time,
+                _ => &node.location,
+            };
+            (
+                node.id.clone(),
+                format!("N{} {}", node.order_no, node.title),
+                before.clone(),
+            )
+        };
+        changes.push(json!({
+            "target": target,
+            "id": id,
+            "label": label,
+            "field": field,
+            "before": before,
+            "value": value
+        }));
+    }
+    if changes.is_empty() {
+        return Ok(ToolOutcome::error(format!(
+            "没有可用的修订：{}",
+            problems.join("；")
+        )));
+    }
+    let count = changes.len();
+    let candidate = crate::candidates::insert(
+        ctx.conn,
+        ctx.project_id,
+        "blueprint_patch",
+        json!({
+            "blueprintId": view.blueprint.id,
+            "title": view.blueprint.title,
+            "changes": changes,
+            "agentReason": reason_of(args)
+        }),
+        None,
+        None,
+        0.6,
+    )?;
+    link_candidate(ctx, &candidate.id)?;
+    let mut content = format!(
+        "已创建蓝本修订候选 {}（{count} 处），等待作者确认。",
+        candidate.id
+    );
+    if !problems.is_empty() {
+        content.push_str(&format!("\n未采用：{}", problems.join("；")));
+    }
+    Ok(ToolOutcome {
+        content,
+        summary: format!("{count} 处修订"),
         candidate_ids: vec![candidate.id],
         ..ToolOutcome::default()
     })
@@ -2446,6 +2770,93 @@ mod tests {
         )
         .unwrap();
         outcome
+    }
+
+    #[test]
+    fn existing_characters_are_revised_through_entity_patch() {
+        let (_dir, mut loaded, session_id) = fixture();
+        let pid = loaded.summary.id.clone();
+        let run_id = create_run(&loaded.conn, &pid, &session_id, "人物", "write", "m").unwrap();
+        let created = run_tool(
+            &loaded,
+            &session_id,
+            &run_id,
+            "write",
+            &call(
+                "propose_change",
+                json!({"kind":"entity","payload":{"type":"character","canonicalName":"林澈","description":"拾钥人","secret":"旧秘密"},"reason":"r"}),
+            ),
+        );
+        crate::candidates::accept(&mut loaded.conn, &pid, &created.candidate_ids[0]).unwrap();
+        let duplicate = run_tool(
+            &loaded,
+            &session_id,
+            &run_id,
+            "write",
+            &call(
+                "propose_change",
+                json!({"kind":"entity","payload":{"type":"character","canonicalName":"林澈"},"reason":"r"}),
+            ),
+        );
+        assert!(duplicate.content.contains("entity_patch"));
+        let patch = run_tool(
+            &loaded,
+            &session_id,
+            &run_id,
+            "write",
+            &call(
+                "propose_change",
+                json!({"kind":"entity_patch","payload":{"canonicalName":"林澈","secret":"他在封箱夜写下了第一页"},"reason":"对齐蓝本"}),
+            ),
+        );
+        assert_eq!(patch.candidate_ids.len(), 1, "{}", patch.content);
+        crate::candidates::accept(&mut loaded.conn, &pid, &patch.candidate_ids[0]).unwrap();
+        let secret: String = loaded
+            .conn
+            .query_row(
+                "SELECT c.secret FROM character_core c JOIN entity e ON e.id=c.entity_id WHERE e.canonical_name='林澈'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(secret, "他在封箱夜写下了第一页");
+    }
+
+    #[test]
+    fn detects_leaked_tool_markup() {
+        assert!(leaked_tool_markup(
+            "<｜｜DSML｜｜ invoke name=\"read_path\">\n<｜｜DSML｜｜ parameter name=\"path\" string=\"true\">/人物</｜｜DSML｜｜ parameter>"
+        ));
+        assert!(!leaked_tool_markup("已登记四个事件，等待你确认。"));
+    }
+
+    #[test]
+    fn long_paths_page_with_offset() {
+        let (_dir, loaded, session_id) = fixture();
+        let pid = loaded.summary.id.clone();
+        crate::craft::save_guide(&loaded.conn, &pid, &"守".repeat(7000)).unwrap();
+        let run_id = create_run(&loaded.conn, &pid, &session_id, "读守则", "plan", "m").unwrap();
+        let first = run_tool(
+            &loaded,
+            &session_id,
+            &run_id,
+            "plan",
+            &call("read_path", json!({"path":"/守则"})),
+        );
+        assert!(
+            first.content.contains("继续读取用 offset=3000"),
+            "{}",
+            first.content
+        );
+        let last = run_tool(
+            &loaded,
+            &session_id,
+            &run_id,
+            "plan",
+            &call("read_path", json!({"path":"/守则","offset":6000})),
+        );
+        assert!(last.content.contains("已读到结尾"));
+        assert_eq!(last.content.chars().filter(|ch| *ch == '守').count(), 1000);
     }
 
     #[test]

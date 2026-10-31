@@ -4,9 +4,7 @@ use rusqlite::{params, Connection, Row};
 use serde_json::json;
 
 use crate::{
-    domain::{
-        AuditIssue, AuditRunResult, ConflictCertificate, RuleRecord,
-    },
+    domain::{AuditIssue, AuditRunResult, ConflictCertificate, RuleRecord},
     error::{AppError, AppResult},
     now, solver,
 };
@@ -186,11 +184,12 @@ fn time_value(value: &str) -> Option<i64> {
     digits.parse().ok()
 }
 
+/// 只有两个时间都能折成数值时才比较先后；“距今三十年”“开城之初”这类说法不能按字符串排序，
+/// 宁可漏报也不制造假冲突。
 fn ordered_later(later: &str, earlier: &str) -> bool {
     match (time_value(later), time_value(earlier)) {
         (Some(a), Some(b)) => a >= b,
-        _ if later.is_empty() || earlier.is_empty() => false,
-        _ => later >= earlier,
+        _ => false,
     }
 }
 
@@ -365,6 +364,15 @@ fn check_dead_acts(
     Ok(issues)
 }
 
+fn place_name(conn: &Connection, id: &str) -> String {
+    conn.query_row(
+        "SELECT canonical_name FROM entity WHERE id=?1",
+        [id],
+        |row| row.get::<_, String>(0),
+    )
+    .unwrap_or_else(|_| id.to_string())
+}
+
 fn check_two_places(
     conn: &Connection,
     project_id: &str,
@@ -374,7 +382,10 @@ fn check_two_places(
     let mut by_time: HashMap<String, Vec<&EventFact>> = HashMap::new();
     for event in &events {
         if !event.story_time.is_empty() {
-            by_time.entry(event.story_time.clone()).or_default().push(event);
+            by_time
+                .entry(event.story_time.clone())
+                .or_default()
+                .push(event);
         }
     }
     let mut issues = Vec::new();
@@ -406,7 +417,9 @@ fn check_two_places(
                         vec![a.source_span.clone(), b.source_span.clone()],
                         format!(
                             "{participant} 在同一故事时间 {} 分别出现在 {} 与 {}。",
-                            a.story_time, place_a, place_b
+                            a.story_time,
+                            place_name(conn, place_a),
+                            place_name(conn, place_b)
                         ),
                         core.clone(),
                         "L3",
@@ -460,8 +473,8 @@ fn check_item_lifecycle(
             {
                 continue;
             }
-            let core = solver::item_after_destroy_core(&destroy.id, &possession.id)
-                .unwrap_or_default();
+            let core =
+                solver::item_after_destroy_core(&destroy.id, &possession.id).unwrap_or_default();
             if let Some(issue) = insert_issue(
                 conn,
                 project_id,
@@ -470,10 +483,7 @@ fn check_item_lifecycle(
                 vec![destroy.source_span.clone(), possession.source_span.clone()],
                 format!(
                     "物品「{}」已在 {} 被销毁或交出，但 {} 仍在 {} 持有。",
-                    item,
-                    destroy.valid_from,
-                    possession.subject,
-                    possession.valid_from
+                    item, destroy.valid_from, possession.subject, possession.valid_from
                 ),
                 core,
                 "L3",
@@ -512,7 +522,13 @@ fn check_relation_direction(
     drop(stmt);
     let mut issues = Vec::new();
     for (id_a, from, to, type_a, id_b, type_b) in rows {
-        let directional = ["父", "母", "师", "上司", "主", "下属"];
+        // 两个方向写着同一种关系，是对称描述而不是矛盾；“班主”里的“主”也不算主仆。
+        if type_a.trim() == type_b.trim() {
+            continue;
+        }
+        let directional = [
+            "父", "母", "师父", "师傅", "徒", "上司", "下属", "主人", "主仆", "仆",
+        ];
         if !directional
             .iter()
             .any(|word| type_a.contains(word) || type_b.contains(word))
@@ -524,7 +540,10 @@ fn check_relation_direction(
             project_id,
             rule,
             vec![id_a, id_b],
-            vec![format!("relation:{from}->{to}"), format!("relation:{to}->{from}")],
+            vec![
+                format!("relation:{from}->{to}"),
+                format!("relation:{to}->{from}"),
+            ],
             format!(
                 "同一对角色同时存在「{}」与「{}」的相反方向关系，需确认哪条是角色认知或误传。",
                 type_a, type_b
@@ -585,8 +604,15 @@ fn check_pov_leak(
             if pov.is_empty() || claim.perspective_id.as_deref() == Some(pov.as_str()) {
                 continue;
             }
-            let Some(index) = text.find(&claim.object) else { continue };
-            let start = text[..index].char_indices().rev().nth(30).map(|(i, _)| i).unwrap_or(0);
+            let Some(index) = text.find(&claim.object) else {
+                continue;
+            };
+            let start = text[..index]
+                .char_indices()
+                .rev()
+                .nth(30)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             let end = (index + claim.object.len() + 60).min(text.len());
             let excerpt = text[start..end].replace('\n', " ");
             if let Some(issue) = insert_issue(
@@ -594,7 +620,10 @@ fn check_pov_leak(
                 project_id,
                 rule,
                 vec![claim.id.clone(), scene_id.clone()],
-                vec![claim.source_span.clone(), format!("chapter:{chapter_id}｜{excerpt}")],
+                vec![
+                    claim.source_span.clone(),
+                    format!("chapter:{chapter_id}｜{excerpt}"),
+                ],
                 format!(
                     "POV「{}」的叙述出现了计划后揭示的信息「{}」，但没有对应的知情或目睹记录。",
                     pov, claim.object
@@ -636,7 +665,9 @@ fn check_overdue_promises(
     drop(stmt);
     let mut issues = Vec::new();
     for (id, title, window, evidence) in rows {
-        let Some(target) = time_value(&window) else { continue };
+        let Some(target) = time_value(&window) else {
+            continue;
+        };
         if current < target as i32 {
             continue;
         }
@@ -647,9 +678,7 @@ fn check_overdue_promises(
             rule,
             vec![id],
             evidence,
-            format!(
-                "伏笔「{title}」计划在「{window}」兑现，当前已到第 {current} 章仍未推进。"
-            ),
+            format!("伏笔「{title}」计划在「{window}」兑现，当前已到第 {current} 章仍未推进。"),
             vec![],
             "L2",
         )? {
@@ -680,7 +709,11 @@ pub fn run_audit(conn: &Connection, project_id: &str) -> AppResult<AuditRunResul
     })
 }
 
-pub fn issues(conn: &Connection, project_id: &str, status: Option<&str>) -> AppResult<Vec<AuditIssue>> {
+pub fn issues(
+    conn: &Connection,
+    project_id: &str,
+    status: Option<&str>,
+) -> AppResult<Vec<AuditIssue>> {
     let sql = if status.is_some() {
         "SELECT i.id, i.rule_id, r.code, r.constraint_layer, i.severity, i.claim_ids,
             i.evidence_spans, i.explanation, i.certificate, i.solver_core, i.risk_level,
@@ -891,9 +924,18 @@ mod tests {
         event(&loaded.conn, &pid, "雨夜归来", &["林澈"], "旧车站", "9");
         event(&loaded.conn, &pid, "葬礼", &["林澈"], "灵堂", "9");
         let result = run_audit(&loaded.conn, &pid).unwrap();
-        assert!(result.issues.iter().any(|i| i.rule_code == "dead_character_acts" && i.risk_level == "L3"));
-        assert!(result.issues.iter().any(|i| i.rule_code == "character_two_places"));
-        assert!(result.issues.iter().any(|i| i.rule_code == "item_destroyed_then_held"));
+        assert!(result
+            .issues
+            .iter()
+            .any(|i| i.rule_code == "dead_character_acts" && i.risk_level == "L3"));
+        assert!(result
+            .issues
+            .iter()
+            .any(|i| i.rule_code == "character_two_places"));
+        assert!(result
+            .issues
+            .iter()
+            .any(|i| i.rule_code == "item_destroyed_then_held"));
         assert!(result
             .issues
             .iter()
@@ -908,7 +950,14 @@ mod tests {
         event(&loaded.conn, &pid, "归来", &["林澈"], "车站", "4");
         let result = run_audit(&loaded.conn, &pid).unwrap();
         let issue = result.issues.first().unwrap();
-        issue_action(&loaded.conn, &pid, &issue.id, "exception_permanent", "这是鬼魂视角").unwrap();
+        issue_action(
+            &loaded.conn,
+            &pid,
+            &issue.id,
+            "exception_permanent",
+            "这是鬼魂视角",
+        )
+        .unwrap();
         let again = run_audit(&loaded.conn, &pid).unwrap();
         assert_eq!(again.issues_created, 0);
     }
@@ -934,7 +983,10 @@ mod tests {
             )
             .unwrap();
         let result = run_audit(&loaded.conn, &pid).unwrap();
-        assert!(result.issues.iter().any(|i| i.rule_code == "promise_overdue"));
+        assert!(result
+            .issues
+            .iter()
+            .any(|i| i.rule_code == "promise_overdue"));
     }
 
     #[test]
@@ -949,6 +1001,23 @@ mod tests {
             .iter()
             .any(|i| i.rule_code == "dead_character_acts"));
         let _ = scenes::chapters(&loaded.conn, &pid);
+    }
+
+    #[test]
+    fn audit_skips_death_checks_when_times_cannot_be_ordered() {
+        let (_dir, loaded) = setup();
+        let pid = loaded.summary.id.clone();
+        claim(&loaded.conn, &pid, "掌灯婆", "死于", "灯楼走水", "守场历421秋-第3夜");
+        event(&loaded.conn, &pid, "接手末角面", &["掌灯婆"], "灯楼", "距今二十五年");
+        event(&loaded.conn, &pid, "开灯价", &["掌灯婆"], "灯楼", "守场历421秋-第4夜");
+        let result = run_audit(&loaded.conn, &pid).unwrap();
+        let deaths: Vec<_> = result
+            .issues
+            .iter()
+            .filter(|i| i.rule_code == "dead_character_acts")
+            .collect();
+        assert_eq!(deaths.len(), 1);
+        assert!(deaths[0].explanation.contains("开灯价"));
     }
 
     #[test]

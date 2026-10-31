@@ -231,6 +231,15 @@ pub async fn harness_send(
                 (output.content.clone(), output.tool_calls.clone())
             };
             if calls.is_empty() {
+                // 部分模型偶尔把内部的函数调用标记当正文吐出来；这时工具没有执行，提醒它重新走工具接口。
+                if !last_turn && harness::leaked_tool_markup(&visible) {
+                    messages.push(json!({"role":"assistant","content":visible}));
+                    messages.push(json!({
+                        "role":"user",
+                        "content":"上一条回复把工具调用写成了文本，工具没有被执行。请通过工具接口重新调用需要的工具，不要在正文里输出调用标记。"
+                    }));
+                    continue;
+                }
                 final_text = visible;
                 break;
             }

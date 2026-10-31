@@ -136,7 +136,8 @@ pub async fn community_summarize(state: State<'_, AppState>) -> IpcResult<Commun
                     ),
                     ChatTurn::user(prompt),
                 ],
-                Some(1800),
+                // 推理型模型的思考也计入输出上限，太小会在给出答案前被截断。
+            Some(client.max_tokens.max(6000)),
             )
             .await;
         match result {
@@ -231,7 +232,7 @@ pub async fn insight_query(
                     insight.retrieval_mode, insight.context
                 )),
             ],
-            Some(1800),
+            Some(client.max_tokens.max(6000)),
         )
         .await
         .map_err(|e| e.to_string())?;

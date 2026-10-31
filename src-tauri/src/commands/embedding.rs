@@ -12,6 +12,18 @@ use crate::{
     state::AppState,
 };
 
+/// 本地 Embedding 服务不需要密钥：只有 API 模式才读取钥匙串，避免为本地检索弹出授权框。
+fn runtime_key(
+    state: &AppState,
+    runtime: &embedding::EmbeddingRuntime,
+) -> Result<Option<String>, String> {
+    if runtime.requires_api_key() {
+        state.api_key().map_err(|error| error.to_string())
+    } else {
+        Ok(None)
+    }
+}
+
 pub async fn semantic_query(
     state: &AppState,
     query: &str,
@@ -24,9 +36,9 @@ pub async fn semantic_query(
         Ok(runtime) => runtime,
         Err(error) => return (None, Some(error.to_string())),
     };
-    let key = match state.api_key() {
+    let key = match runtime_key(state, &runtime) {
         Ok(key) => key,
-        Err(error) => return (None, Some(error.to_string())),
+        Err(error) => return (None, Some(error)),
     };
     match embedding::embed_query(&runtime, key.as_deref(), query).await {
         Ok(vector) => (
@@ -66,7 +78,7 @@ pub async fn embedding_test(state: State<'_, AppState>) -> IpcResult<ModelTestRe
             })
         }
     };
-    let key = state.api_key().map_err(|error| error.to_string())?;
+    let key = runtime_key(&state, &runtime)?;
     let result = embedding::embed_texts(
         &runtime,
         key.as_deref(),
@@ -104,7 +116,7 @@ pub async fn embedding_index(
     let config = state.model_store.load();
     let runtime =
         embedding::EmbeddingRuntime::from_config(&config).map_err(|error| error.to_string())?;
-    let key = state.api_key().map_err(|error| error.to_string())?;
+    let key = runtime_key(&state, &runtime)?;
     let plan = state
         .with_project(|loaded| {
             embedding::prepare_index(&loaded.conn, &loaded.summary.id, &runtime, rebuild)
